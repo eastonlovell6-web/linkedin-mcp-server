@@ -125,6 +125,15 @@ class TestDetectConnectionState:
             == "pending"
         )
 
+    def test_pending_state_anchor_outranks_every_connect_signal(self):
+        # Reading an outstanding invitation as connectable would send again.
+        assert (
+            detect_connection_state(
+                self._signals(compose_in_root=True, invite=True, connect_button=True, connect_state_anchor=True)
+            )
+            == "pending"
+        )
+
     def test_connect_button_takes_priority_over_incoming_row(self):
         assert (
             detect_connection_state(self._signals(connect_button=True, incoming_row=True))

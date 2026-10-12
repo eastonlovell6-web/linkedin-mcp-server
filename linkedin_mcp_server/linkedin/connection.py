@@ -95,14 +95,15 @@ class ActionSignals:
     ``ConnectButtonstate`` and ends in ``_connect``, linking to this user's
     profile (``/in/{user}/``). LinkedIn now renders Connect this way, with no
     ``/preload/custom-invite/`` anchor; the old rules read it as Pending.
-    The componentkey is an identifier, not a localized word, and the href
-    scoping keeps "People similar to" sidebar Connect buttons for other
-    profiles out."""
+    The componentkey is an identifier, not a localized word. Only the top
+    card counts: the "People you may know" rail renders the same anchor for
+    other members, and its href is the viewed profile too, so href scoping
+    cannot tell them apart."""
 
     has_connect_state_anchor: bool = False
-    """Same ``ConnectButtonstate`` anchor for this user, in a state other than
-    ``_connect`` (an invitation already outstanding). Positive Pending
-    evidence in the 2026-10 layout."""
+    """Same ``ConnectButtonstate`` anchor in the top card, in a state other
+    than ``_connect`` (live: ``_pending``, labelled "Pending, click to
+    withdraw"). Positive Pending evidence; outranks every Connect signal."""
 
 
 def detect_connection_state(signals: ActionSignals) -> ConnectionState:
@@ -111,7 +112,10 @@ def detect_connection_state(signals: ActionSignals) -> ConnectionState:
     Resolution order:
 
     1. ``self_profile`` — edit-intro anchor (URL).
-    2. ``connectable`` — vanityName invite anchor (URL).
+    1b. ``pending`` — a 2026-10 top-card ``ConnectButtonstate`` anchor in a
+       non-``_connect`` state. Precedes every Connect signal.
+    2. ``connectable`` — vanityName invite anchor (URL) or the 2026-10
+       top-card ``_connect`` anchor.
     3. ``incoming_request`` — structural action-row fingerprint. Must
        precede the pending check: incoming profiles have no Message
        button in the top card, so the compose-anchor action-root walk
@@ -133,12 +137,14 @@ def detect_connection_state(signals: ActionSignals) -> ConnectionState:
     """
     if signals.has_edit_intro_anchor:
         return "self_profile"
+    # An outstanding invitation outranks any Connect signal: misreading
+    # Pending as connectable would open the invite dialog and send again.
+    if signals.has_connect_state_anchor:
+        return "pending"
     if signals.has_invite_anchor or signals.has_connect_button:
         return "connectable"
     if signals.has_incoming_action_row:
         return "incoming_request"
-    if signals.has_connect_state_anchor:
-        return "pending"
     if signals.has_labeled_action_anchor:
         return "pending"
     if signals.has_compose_anchor_in_action_root:

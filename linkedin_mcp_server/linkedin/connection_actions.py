@@ -197,21 +197,20 @@ ACTION_SIGNALS_JS = (
 
   const actionRoot = findActionRoot(main);
 
-  // 2026-10 layout: Connect is an <a> linking to this profile with a
-  // componentkey "ConnectButtonstate:...<id>_connect". Scoped by the exact
-  // profile path so sidebar Connect buttons for other people never count.
-  // The componentkey is an identifier, not a localized word.
-  const profilePath = `/in/${String(username).toLowerCase()}/`;
+  // 2026-10 layout: Connect is an <a> with a componentkey
+  // "ConnectButtonstate:invitation:urn:li:member:<id>_<state>" (_connect,
+  // _pending). Its href is NOT the target: every such anchor on the page,
+  // including the "People you may know" rail's Connect buttons for other
+  // members, links to the profile being viewed. Only anchors in the top card
+  // count (the action root, else the first section of main), never one in an
+  // <aside> (the rail). Verified live 2026-10-12 on two pending profiles and
+  // one connectable one. The componentkey is an identifier, not a localized word.
+  const topCard = main.querySelector('section') || main.firstElementChild || main;
+  const connectScope = actionRoot || topCard;
   let hasConnectButton = false;
   let hasConnectStateAnchor = false;
-  for (const a of document.querySelectorAll('a[componentkey*="ConnectButtonstate"]')) {
-    let path = '';
-    try {
-      path = new URL(a.getAttribute('href') || '', location.href).pathname.toLowerCase();
-    } catch (e) {
-      continue;
-    }
-    if (path !== profilePath) continue;
+  for (const a of connectScope.querySelectorAll('a[componentkey*="ConnectButtonstate"]')) {
+    if (a.closest('aside')) continue;
     if ((a.getAttribute('componentkey') || '').endsWith('_connect')) {
       hasConnectButton = true;
     } else {

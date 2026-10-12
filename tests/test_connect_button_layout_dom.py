@@ -57,6 +57,22 @@ def _sidebar_connect(user: str) -> str:
     return f"<section><div><p>{user}</p><div>{_connect_anchor(user, 'connect', '999')}</div></div></section>"
 
 
+def _rail(viewed: str, *members: str) -> str:
+    """The live "People you may know" rail: an <aside> inside <main> whose
+    Connect anchors carry other members' ids but link to the VIEWED profile
+    (observed 2026-10-12 on every profile probed)."""
+    cards = "".join(
+        f"<section><div><p>Member {m}</p>{_connect_anchor(viewed, 'connect', m)}</div></section>"
+        for m in members
+    )
+    return f"<aside>{cards}</aside>"
+
+
+def _page_with_header(header: str, *sections: str) -> str:
+    """The sticky header copy of the Connect control sits outside <main>."""
+    return f"<html><body><header>{header}</header><main>{''.join(sections)}</main></body></html>"
+
+
 def _page(*sections: str) -> str:
     return f"<html><body><main>{''.join(sections)}</main></body></html>"
 
@@ -117,8 +133,37 @@ class TestConnectButtonLayout:
         assert raw["hasConnectStateAnchor"] is False
         assert state != "connectable"
 
-    async def test_a_similar_slug_does_not_match(self, dom_page):
-        # /in/testuser2/ must not count as /in/testuser/.
-        state, raw = await _state(dom_page, _page(_top_card(_connect_anchor(USER + "2", "connect"), MESSAGE, MORE)))
+    async def test_live_pending_profile_with_rail_is_pending(self, dom_page):
+        # Farid Pakravan, 2026-10-12: invitation confirmed in the Sent list; the
+        # old href scoping read the rail's _connect anchors as his and reported
+        # send_failed for a delivered invite.
+        pending = _connect_anchor(USER, "pending", "91424629")
+        html = _page_with_header(
+            pending,
+            _top_card(pending, MESSAGE, MORE),
+            _rail(USER, "263534462", "573658256", "103174284"),
+        )
+        state, raw = await _state(dom_page, html)
+        assert raw["hasConnectButton"] is False
+        assert raw["hasConnectStateAnchor"] is True
+        assert state == "pending"
+
+    async def test_live_connectable_profile_with_rail_is_connectable(self, dom_page):
+        connect = _connect_anchor(USER, "connect", "201307698")
+        html = _page_with_header(connect, _top_card(connect, MESSAGE, MORE), _rail(USER, "13489154"))
+        state, raw = await _state(dom_page, html)
+        assert raw["hasConnectButton"] is True
+        assert raw["hasConnectStateAnchor"] is False
+        assert state == "connectable"
+
+    async def test_rail_connect_alone_is_not_connectable(self, dom_page):
+        # A top card without a Connect control (e.g. 1st-degree) must not
+        # borrow one from the rail, even though the rail links to this profile.
+        state, raw = await _state(dom_page, _page(_top_card(MESSAGE, MORE), _rail(USER, "1", "2")))
         assert raw["hasConnectButton"] is False
         assert state != "connectable"
+
+    async def test_pending_outranks_connect_in_the_top_card(self, dom_page):
+        html = _page(_top_card(_connect_anchor(USER, "pending"), _connect_anchor(USER, "connect"), MESSAGE, MORE))
+        state, _ = await _state(dom_page, html)
+        assert state == "pending"
