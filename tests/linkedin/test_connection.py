@@ -15,6 +15,8 @@ class TestDetectConnectionState:
         labeled_action: bool = False,
         labeled_anchor: bool = False,
         incoming_row: bool = False,
+        connect_button: bool = False,
+        connect_state_anchor: bool = False,
     ) -> ActionSignals:
         return ActionSignals(
             has_invite_anchor=invite,
@@ -23,6 +25,8 @@ class TestDetectConnectionState:
             has_labeled_action_button=labeled_action,
             has_labeled_action_anchor=labeled_anchor,
             has_incoming_action_row=incoming_row,
+            has_connect_button=connect_button,
+            has_connect_state_anchor=connect_state_anchor,
         )
 
     def test_self_profile(self):
@@ -101,3 +105,35 @@ class TestDetectConnectionState:
         assert (
             detect_connection_state(self._signals(labeled_action=True)) == "unavailable"
         )
+
+    # 2026-10 top-card layout: Connect is an <a> linking to the profile with a
+    # componentkey "ConnectButtonstate:invitation:urn:li:member:<id>_connect"
+    # and an aria-label. Without the connect-button signal it reads as Pending.
+    def test_connect_button_is_connectable_even_with_a_labeled_anchor(self):
+        assert (
+            detect_connection_state(
+                self._signals(compose_in_root=True, labeled_anchor=True, connect_button=True)
+            )
+            == "connectable"
+        )
+
+    def test_connect_state_anchor_that_is_not_connect_is_pending(self):
+        assert (
+            detect_connection_state(
+                self._signals(compose_in_root=True, labeled_action=True, connect_state_anchor=True)
+            )
+            == "pending"
+        )
+
+    def test_connect_button_takes_priority_over_incoming_row(self):
+        assert (
+            detect_connection_state(self._signals(connect_button=True, incoming_row=True))
+            == "connectable"
+        )
+
+    def test_self_profile_beats_connect_button(self):
+        assert (
+            detect_connection_state(self._signals(edit=True, connect_button=True))
+            == "self_profile"
+        )
+

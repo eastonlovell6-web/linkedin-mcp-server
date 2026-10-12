@@ -197,6 +197,28 @@ ACTION_SIGNALS_JS = (
 
   const actionRoot = findActionRoot(main);
 
+  // 2026-10 layout: Connect is an <a> linking to this profile with a
+  // componentkey "ConnectButtonstate:...<id>_connect". Scoped by the exact
+  // profile path so sidebar Connect buttons for other people never count.
+  // The componentkey is an identifier, not a localized word.
+  const profilePath = `/in/${String(username).toLowerCase()}/`;
+  let hasConnectButton = false;
+  let hasConnectStateAnchor = false;
+  for (const a of document.querySelectorAll('a[componentkey*="ConnectButtonstate"]')) {
+    let path = '';
+    try {
+      path = new URL(a.getAttribute('href') || '', location.href).pathname.toLowerCase();
+    } catch (e) {
+      continue;
+    }
+    if (path !== profilePath) continue;
+    if ((a.getAttribute('componentkey') || '').endsWith('_connect')) {
+      hasConnectButton = true;
+    } else {
+      hasConnectStateAnchor = true;
+    }
+  }
+
   let hasComposeInActionRoot = false;
   let hasLabeledActionButton = false;
   let hasLabeledActionAnchor = false;
@@ -210,6 +232,10 @@ ACTION_SIGNALS_JS = (
       }
     }
     for (const a of actionRoot.querySelectorAll('a')) {
+      // Mutual-connection links ("Open …/search/results/…") are not actions.
+      if ((a.getAttribute('href') || '').includes('/search/results/')) continue;
+      // The 2026-10 Connect anchor is reported by hasConnectButton above.
+      if ((a.getAttribute('componentkey') || '').includes('ConnectButtonstate')) continue;
       if (a.hasAttribute('aria-label')) {
         hasLabeledActionAnchor = true;
         break;
@@ -224,6 +250,8 @@ ACTION_SIGNALS_JS = (
     hasLabeledActionButton,
     hasLabeledActionAnchor,
     hasIncomingActionRow: !!findIncomingActionRow(main),
+    hasConnectButton,
+    hasConnectStateAnchor,
   };
 })
 """
@@ -274,6 +302,18 @@ CLICK_INCOMING_ACCEPT_JS = (
 })
 """
 )
+
+
+# The top-card controls LinkedIn hydrates after the first paint in the
+# 2026-10 layout (Connect / Pending), plus the older invite anchor.
+_TOP_CARD_CONNECT_SELECTOR = (
+    'a[componentkey*="ConnectButtonstate"], a[href*="/preload/custom-invite/"]'
+)
+
+
+def _exposes_connect(signals: ActionSignals) -> bool:
+    """Connect is offered: the old invite anchor or the 2026-10 Connect link."""
+    return signals.has_invite_anchor or signals.has_connect_button
 
 
 def _connection_result(
@@ -459,6 +499,21 @@ class ConnectionActions:
             logger.debug("Incoming accept click via JS failed", exc_info=True)
             return False
 
+    async def _wait_for_top_card_actions(self, *, timeout: int = 5000) -> None:
+        """Give LinkedIn a moment to hydrate the Connect / Pending control.
+
+        The 2026-10 top card paints Message and More first and adds the
+        Connect link a moment later; reading signals before that would see
+        no Connect at all. A profile with neither control (1st degree,
+        follow-only) simply times out, which is not an error.
+        """
+        try:
+            await self._session.page.wait_for_selector(
+                _TOP_CARD_CONNECT_SELECTOR, state="attached", timeout=timeout
+            )
+        except Exception:
+            logger.debug("No Connect/Pending control appeared before reading signals")
+
     async def _read_action_signals(self, username: str) -> ActionSignals:
         """Read locale-independent structural signals for a profile's
         relationship state.
@@ -490,6 +545,8 @@ class ConnectionActions:
             has_labeled_action_button=bool(data.get("hasLabeledActionButton")),
             has_labeled_action_anchor=bool(data.get("hasLabeledActionAnchor")),
             has_incoming_action_row=bool(data.get("hasIncomingActionRow")),
+            has_connect_button=bool(data.get("hasConnectButton")),
+            has_connect_state_anchor=bool(data.get("hasConnectStateAnchor")),
         )
 
     async def _submit_invite_dialog(
@@ -745,6 +802,7 @@ class ConnectionActions:
                 url, "unavailable", "Could not read profile page."
             )
 
+        await self._wait_for_top_card_actions()
         signals = await self._read_action_signals(username)
         state = connection.detect_connection_state(signals)
         logger.info(
@@ -847,7 +905,7 @@ class ConnectionActions:
         # deeplink only as a non-submitting probe so we can report the Premium
         # note-quota block without accidentally sending from a follow-only or
         # otherwise unavailable profile.
-        if not signals.has_invite_anchor:
+        if not _exposes_connect(signals):
             if note:
                 logger.info(
                     "No visible invite anchor for %s; probing custom-invite deeplink "
@@ -894,7 +952,7 @@ class ConnectionActions:
 
         verified = await self._read_main_profile(username)
         verified_signals = await self._read_action_signals(username)
-        if verified_signals.has_invite_anchor:
+        if _exposes_connect(verified_signals):
             # The same settle retry as the accept path: an immediate re-read
             # can still render Connect for an invitation LinkedIn already
             # recorded (observed live 2026-09-26: send_failed, then Pending).
@@ -911,7 +969,7 @@ class ConnectionActions:
         verified_text = verified.get("sections", {}).get("main_profile", "")
         verified_state = connection.detect_connection_state(verified_signals)
 
-        if verified_signals.has_invite_anchor:
+        if _exposes_connect(verified_signals):
             return _connection_result(
                 url,
                 "send_failed",

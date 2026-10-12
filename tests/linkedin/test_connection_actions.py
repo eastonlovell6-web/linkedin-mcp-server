@@ -77,6 +77,8 @@ def _signals(
     labeled_action: bool = False,
     labeled_anchor: bool = False,
     incoming_row: bool = False,
+    connect_button: bool = False,
+    connect_state_anchor: bool = False,
 ) -> ActionSignals:
     return ActionSignals(
         has_invite_anchor=invite,
@@ -85,10 +87,76 @@ def _signals(
         has_labeled_action_button=labeled_action,
         has_labeled_action_anchor=labeled_anchor,
         has_incoming_action_row=incoming_row,
+        has_connect_button=connect_button,
+        has_connect_state_anchor=connect_state_anchor,
     )
 
 
 class TestConnectWithPerson:
+    async def test_new_layout_connect_button_sends_through_the_deeplink(self, mock_page):
+        """2026-10 layout: no invite anchor, a ConnectButtonstate _connect link instead."""
+        text = "Jane\n\n· 2nd\n\nEngineer\n\nConnect\nMessage\nMore\n"
+        post_text = "Jane\n\n· 2nd\n\nEngineer\n\nPending\nMessage\nMore\n"
+        actions = _actions(mock_page, _reads(text, post_text))
+        with (
+            patch.object(actions, "_read_action_signals", new_callable=AsyncMock,
+                         side_effect=[_signals(compose=True, connect_button=True, labeled_action=True),
+                                      _signals(compose=True, connect_state_anchor=True, labeled_action=True)]),
+            patch.object(PageNavigator, "_navigate_to_page", new_callable=AsyncMock) as mock_nav,
+            patch.object(actions, "_dialog_is_open", new_callable=AsyncMock, return_value=True),
+            patch.object(actions, "_click_dialog_primary_button", new_callable=AsyncMock, return_value=True),
+        ):
+            result = await actions.connect_with_person("testuser")
+        assert result["status"] == "connected"
+        assert "preload/custom-invite" in mock_nav.await_args.args[0]
+        assert "vanityName=testuser" in mock_nav.await_args.args[0]
+
+    async def test_new_layout_connect_button_still_there_after_send_is_send_failed(self, mock_page):
+        text = "Jane\n\n· 2nd\n\nConnect\nMessage\nMore\n"
+        actions = _actions(mock_page, _reads(text, text, text))
+        persists = _signals(compose=True, connect_button=True, labeled_action=True)
+        with (
+            patch.object(actions, "_read_action_signals", new_callable=AsyncMock,
+                         side_effect=[persists, persists, persists]),
+            patch.object(PageNavigator, "_navigate_to_page", new_callable=AsyncMock),
+            patch.object(actions, "_dialog_is_open", new_callable=AsyncMock, return_value=True),
+            patch.object(actions, "_click_dialog_primary_button", new_callable=AsyncMock, return_value=True),
+            patch("linkedin_mcp_server.linkedin.connection_actions.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await actions.connect_with_person("testuser")
+        assert result["status"] == "send_failed"
+
+    async def test_new_layout_pending_never_navigates(self, mock_page):
+        text = "Jane\n\n· 2nd\n\nPending\nMessage\nMore\n"
+        actions = _actions(mock_page, _reads(text))
+        with (
+            patch.object(actions, "_read_action_signals", new_callable=AsyncMock,
+                         return_value=_signals(compose=True, connect_state_anchor=True, labeled_action=True)),
+            patch.object(PageNavigator, "_navigate_to_page", new_callable=AsyncMock) as mock_nav,
+        ):
+            result = await actions.connect_with_person("testuser")
+        assert result["status"] == "pending"
+        mock_nav.assert_not_awaited()
+
+    async def test_waits_for_the_connect_control_before_reading_signals(self, mock_page):
+        text = "Jane\n\n· 2nd\n\nPending\nMessage\nMore\n"
+        actions = _actions(mock_page, _reads(text))
+        mock_page.wait_for_selector = AsyncMock(return_value=None)
+        with patch.object(actions, "_read_action_signals", new_callable=AsyncMock,
+                          return_value=_signals(compose=True, connect_state_anchor=True, labeled_action=True)):
+            await actions.connect_with_person("testuser")
+        selector = mock_page.wait_for_selector.await_args.args[0]
+        assert "ConnectButtonstate" in selector
+
+    async def test_a_missing_connect_control_after_the_wait_does_not_raise(self, mock_page):
+        text = "Jane\n\n· 1st\n\nMessage\nMore\n"
+        actions = _actions(mock_page, _reads(text))
+        mock_page.wait_for_selector = AsyncMock(side_effect=PlaywrightTimeoutError("timeout"))
+        with patch.object(actions, "_read_action_signals", new_callable=AsyncMock,
+                          return_value=_signals(compose=True)):
+            result = await actions.connect_with_person("testuser")
+        assert result["status"] == "already_connected"
+
     async def test_connectable_navigates_deeplink_and_verifies(self, mock_page):
         """Connect via deeplink: dialog opens, submit succeeds, anchor disappears."""
         text = "Jane\n\n· 3rd\n\nEngineer\n\nConnect\nMore\nAbout\n"

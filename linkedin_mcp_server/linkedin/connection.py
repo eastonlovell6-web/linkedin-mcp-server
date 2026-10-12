@@ -90,6 +90,20 @@ class ActionSignals:
     finds no top-card root on incoming profiles (they have no Message
     button) and would otherwise mis-anchor on sidebar cards."""
 
+    has_connect_button: bool = False
+    """2026-10 top-card layout: an ``<a>`` whose ``componentkey`` contains
+    ``ConnectButtonstate`` and ends in ``_connect``, linking to this user's
+    profile (``/in/{user}/``). LinkedIn now renders Connect this way, with no
+    ``/preload/custom-invite/`` anchor; the old rules read it as Pending.
+    The componentkey is an identifier, not a localized word, and the href
+    scoping keeps "People similar to" sidebar Connect buttons for other
+    profiles out."""
+
+    has_connect_state_anchor: bool = False
+    """Same ``ConnectButtonstate`` anchor for this user, in a state other than
+    ``_connect`` (an invitation already outstanding). Positive Pending
+    evidence in the 2026-10 layout."""
+
 
 def detect_connection_state(signals: ActionSignals) -> ConnectionState:
     """Determine the relationship state for a profile from structural signals.
@@ -119,10 +133,12 @@ def detect_connection_state(signals: ActionSignals) -> ConnectionState:
     """
     if signals.has_edit_intro_anchor:
         return "self_profile"
-    if signals.has_invite_anchor:
+    if signals.has_invite_anchor or signals.has_connect_button:
         return "connectable"
     if signals.has_incoming_action_row:
         return "incoming_request"
+    if signals.has_connect_state_anchor:
+        return "pending"
     if signals.has_labeled_action_anchor:
         return "pending"
     if signals.has_compose_anchor_in_action_root:
