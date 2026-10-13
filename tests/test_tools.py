@@ -1641,8 +1641,9 @@ class TestMessagingTools:
         assert tool is not None
         message_schema = tool.parameters["properties"]["message"]
         assert " ".join(message_schema["description"].split()) == (
-            "Single-line message text to send. C0 control characters and DEL are "
-            "rejected, including CR, LF, and tab."
+            "Message text to send. Single line breaks (LF) and one blank line between "
+            "paragraphs are allowed; other C0 control characters, CR, tab and DEL are "
+            "rejected."
         )
 
     @pytest.mark.parametrize("message", ["", "   \t\n"], ids=["empty", "whitespace"])
@@ -1677,8 +1678,14 @@ class TestMessagingTools:
 
     @pytest.mark.parametrize(
         "message",
-        [f"First{chr(codepoint)}Second" for codepoint in (*range(32), 127)],
-        ids=[f"U+{codepoint:04X}" for codepoint in (*range(32), 127)],
+        [
+            f"First{chr(codepoint)}Second"
+            for codepoint in (*range(32), 127)
+            if codepoint != 10
+        ],
+        ids=[
+            f"U+{codepoint:04X}" for codepoint in (*range(32), 127) if codepoint != 10
+        ],
     )
     async def test_send_message_refuses_controls_before_a_session(
         self, mock_context, message
@@ -1698,7 +1705,7 @@ class TestMessagingTools:
         ready.assert_not_awaited()
         assert result["status"] == "invalid_message"
         assert result["message"] == (
-            "Message must not contain control characters or line breaks."
+            "Message must not contain control characters other than line breaks."
         )
         assert result["retry_safe"] is True
 

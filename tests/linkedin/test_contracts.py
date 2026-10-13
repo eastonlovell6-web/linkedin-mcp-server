@@ -85,13 +85,30 @@ class TestMessageActionResult:
 
 
 class TestRefuseAnInvalidMessage:
-    @pytest.mark.parametrize("message", ["line\nbreak", "before\tafter", "text\x7f"])
-    def test_every_c0_or_del_character_is_refused(self, message: str):
+    @pytest.mark.parametrize("message", ["before\tafter", "text\x7f", "a\rb", "a\r\nb"])
+    def test_rejects_control_characters(self, message):
         assert refuse_an_invalid_message("alice", message) == message_action_result(
             "https://www.linkedin.com/in/alice/",
             "invalid_message",
-            "Message must not contain control characters or line breaks.",
+            "Message must not contain control characters other than line breaks.",
         )
+
+    @pytest.mark.parametrize("message", ["\nHello", "Hello\n", "a\n\n\nb"])
+    def test_rejects_bad_line_break_shapes(self, message):
+        assert refuse_an_invalid_message("alice", message) == message_action_result(
+            "https://www.linkedin.com/in/alice/",
+            "invalid_message",
+            "Message must not start or end with a line break, or contain more than one blank line in a row.",
+        )
+
+    @pytest.mark.parametrize(
+        "message", ["line\nbreak", "Para one.\n\nPara two.\n\nA Yes\nB No"]
+    )
+    def test_allows_single_and_double_line_breaks(self, message):
+        assert refuse_an_invalid_message("alice", message) is None
+
+    def test_emoji_and_accents_allowed(self):
+        assert refuse_an_invalid_message("alice", "Hi José,\n\nD Go to hell 😄") is None
 
     def test_whitespace_is_refused_before_normal_message_text(self):
         assert refuse_an_invalid_message("alice", "   ") == message_action_result(

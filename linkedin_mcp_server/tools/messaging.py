@@ -280,8 +280,8 @@ def register_messaging_tools(
 
         Args:
             linkedin_username: LinkedIn username of the recipient; a full profile URL is accepted too
-            message: Single-line message text to send. C0 control characters and
-                DEL are rejected, including CR, LF, and tab.
+            message: Message text to send. Single line breaks (LF) and one blank line between
+                paragraphs are allowed; other C0 control characters, CR, tab and DEL are rejected.
             confirm_send: Must be True to send the message
             ctx: FastMCP context for progress reporting
             profile_urn: Optional profile URN (e.g. ACoAAB...) to verify against

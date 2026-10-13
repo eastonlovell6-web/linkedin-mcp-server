@@ -1051,8 +1051,8 @@ class TestComposerRecipientDom:
 class TestSendConfirmationDom:
     @pytest.mark.parametrize(
         "message",
-        ["First\nSecond", "First\rSecond", "First\tSecond", "First\x7fSecond"],
-        ids=["newline", "carriage-return", "tab", "del"],
+        ["First\rSecond", "First\tSecond", "First\x7fSecond"],
+        ids=["carriage-return", "tab", "del"],
     )
     async def test_control_characters_are_rejected_before_dom_interaction(
         self, dom_page, message
@@ -1063,7 +1063,7 @@ class TestSendConfirmationDom:
 
         assert result["status"] == "invalid_message"
         assert result["message"] == (
-            "Message must not contain control characters or line breaks."
+            "Message must not contain control characters other than line breaks."
         )
         assert result["retry_safe"] is True
         assert await dom_page.evaluate("document.body.dataset.clicked") is None

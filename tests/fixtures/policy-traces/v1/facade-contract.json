@@ -728,7 +728,7 @@
               "type": "string"
             },
             "message": {
-              "description": "Single-line message text to send. C0 control characters and\nDEL are rejected, including CR, LF, and tab.",
+              "description": "Message text to send. Single line breaks (LF) and one blank line between\nparagraphs are allowed; other C0 control characters, CR, tab and DEL are rejected.",
               "type": "string"
             },
             "profile_urn": {

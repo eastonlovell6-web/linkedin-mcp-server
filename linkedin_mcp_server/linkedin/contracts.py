@@ -99,11 +99,18 @@ def refuse_an_invalid_message(
     reason = None
     if not message.strip():
         reason = "Message must contain non-whitespace characters."
-    elif any(ord(character) < 32 or ord(character) == 127 for character in message):
-        # Keep the browser-side insertion contract to plain message text.
-        # Reject every C0 control and DEL before a session is acquired so no
-        # control input can reach the contenteditable surface.
-        reason = "Message must not contain control characters or line breaks."
+    elif any(
+        (ord(character) < 32 and character != "\n") or ord(character) == 127
+        for character in message
+    ):
+        # LF is the only control character allowed: the browser side turns each
+        # one into a paragraph break with execCommand, never a key event.
+        reason = "Message must not contain control characters other than line breaks."
+    elif message.startswith("\n") or message.endswith("\n") or "\n\n\n" in message:
+        reason = (
+            "Message must not start or end with a line break, "
+            "or contain more than one blank line in a row."
+        )
     if reason is None:
         return None
     return message_action_result(
