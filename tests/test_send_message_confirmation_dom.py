@@ -120,6 +120,42 @@ PARAGRAPH_BUBBLE_SEND_JS = """
   });
 """
 
+# LinkedIn's editor treating a programmatic paragraph break as Send: the first
+# line leaves as a message and the composer empties. The click listener and
+# the clear listener record on the DOM, which every script world can read.
+SEND_ON_PARAGRAPH_JS = """
+  document.getElementById('send').addEventListener('click', event => {
+    event.preventDefault();
+    document.body.dataset.clicked = 'true';
+  });
+  const composer = document.getElementById('composer');
+  composer.addEventListener('input', event => {
+    if (event.inputType !== 'insertParagraph') return;
+    document.getElementById('thread').appendChild(
+      messageItem(composer.innerText, 'client-opaque-id'));
+    composer.textContent = '';
+  });
+  composer.addEventListener('input', event => {
+    if (event.inputType === 'deleteContentBackward') {
+      document.body.dataset.cleared = 'true';
+    }
+  });
+"""
+
+# An editor that flattens paragraph breaks: every character stays in the
+# composer, so nothing can have been sent and the attempt is safe to retry.
+FLATTEN_ON_PARAGRAPH_JS = """
+  document.getElementById('send').addEventListener('click', event => {
+    event.preventDefault();
+    document.body.dataset.clicked = 'true';
+  });
+  document.getElementById('composer').addEventListener('input', event => {
+    if (event.inputType === 'insertParagraph') {
+      event.target.textContent = event.target.textContent;
+    }
+  });
+"""
+
 REPARENTED_BASELINE_SEND_JS = """
   document.getElementById('send').addEventListener('click', event => {
     event.preventDefault();
@@ -1103,6 +1139,73 @@ class TestSendConfirmationDom:
         entries = dom_page.locator("#thread .msg")
         assert await entries.count() == 2
         assert await entries.last.locator("p").count() == 3
+
+    async def test_send_on_paragraph_break_is_never_retry_safe(self, dom_page):
+        message = "Hi Ada.\n\nOne line.\nTwo lines."
+        result = await send(
+            dom_page, compose_page(SEND_ON_PARAGRAPH_JS), message=message
+        )
+
+        assert result["status"] == "send_unconfirmed"
+        assert result["sent"] is False
+        assert result["retry_safe"] is False
+        assert await dom_page.evaluate("document.body.dataset.clicked") is None
+        assert await dom_page.evaluate("document.body.dataset.cleared") is None
+        entries = dom_page.locator("#thread .msg")
+        assert await entries.count() == 2
+        assert (await entries.last.inner_text()).strip() == "Hi Ada."
+
+    async def test_garbled_multiline_write_is_cleared_and_retry_safe(self, dom_page):
+        result = await send(
+            dom_page,
+            compose_page(FLATTEN_ON_PARAGRAPH_JS),
+            message="Hi Ada.\n\nOne line.\nTwo lines.",
+        )
+
+        assert result["status"] == "compose_interact_failed"
+        assert result["sent"] is False
+        assert result["retry_safe"] is True
+        assert await dom_page.evaluate("document.body.dataset.clicked") is None
+        assert (await dom_page.locator("#composer").inner_text()).strip() == ""
+
+    async def test_insert_failing_partway_is_cleared_and_retry_safe(self, dom_page):
+        await dom_page.goto(COMPOSE_URL)
+        html = compose_page(NOOP_SEND_JS)
+
+        async def fail_partway(page):
+            await page.evaluate(
+                """() => {
+                  const real = document.execCommand.bind(document);
+                  let calls = 0;
+                  document.execCommand = (...args) =>
+                    (++calls > 3 ? false : real(...args));
+                }"""
+            )
+
+        sender = _sender(dom_page)
+        await dom_page.set_content(html)
+        await fail_partway(dom_page)
+        with (
+            patch.object(PageNavigator, "_navigate_to_page", new_callable=AsyncMock),
+            patch.object(
+                sender,
+                "_read_profile_message_target",
+                new_callable=AsyncMock,
+                return_value=_ProfileMessageTargetResolution("resolved", TARGET),
+            ),
+            patch(
+                "linkedin_mcp_server.linkedin.message_sender._message_page_url_is_safe",
+                return_value=True,
+            ),
+        ):
+            result = await sender.send_message(
+                "fadi-eliwi", "Hi Ada.\n\nOne line.\nTwo lines.", confirm_send=True
+            )
+
+        assert result["status"] == "compose_interact_failed"
+        assert result["retry_safe"] is True
+        assert await dom_page.evaluate("document.body.dataset.clicked") is None
+        assert (await dom_page.locator("#composer").inner_text()).strip() == ""
 
     async def test_local_bubble_without_id_transition_is_not_confirmed(self, dom_page):
         result = await send(dom_page, compose_page(FIXED_ID_BUBBLE_JS))

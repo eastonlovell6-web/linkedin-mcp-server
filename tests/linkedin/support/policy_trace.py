@@ -610,7 +610,7 @@ def semantic_program_id(program: str) -> str:
         ("return inspect(target).status === 'valid'", "message_composer_ready"),
         ("submitUsable", "message_composer_state"),
         ("__linkedinMcpComposer =", "message_composer_owner"),
-        ("document.execCommand('insertText'", "message_composer_write"),
+        ("document.execCommand(command", "message_composer_write"),
         ("return pinned.button.disabled", "message_submit_ready"),
         ("inputType: 'deleteContentBackward'", "message_composer_cleanup"),
         ("pinned.button.click()", "message_submit"),

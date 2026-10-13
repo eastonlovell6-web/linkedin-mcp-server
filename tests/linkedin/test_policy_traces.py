@@ -557,6 +557,22 @@ async def test_message_retry_safety_and_cleanup_follow_dispatch_boundary():
         assert "message_composer_cleanup" not in operations
 
 
+async def test_message_write_divergence_is_never_retry_safe_or_cleared():
+    trace = (await build_policy_traces())["message-write-diverged.json"]
+    operations = _operation_positions(trace)
+
+    assert trace["result"]["status"] == "send_unconfirmed"
+    assert trace["result"]["sent"] is False
+    assert trace["result"]["retry_safe"] is False
+    assert operations["message_composer_write"]
+    assert operations["message_composer_dispose"]
+    # The editor may have sent part of the text: never clear it, never submit.
+    assert "message_composer_cleanup" not in operations
+    assert "message_submit_ready" not in operations
+    assert "message_submit" not in operations
+    assert "message_confirmation_prepare" not in operations
+
+
 async def test_message_cancellation_propagates_after_owner_cleanup():
     trace = (await build_policy_traces())["message-cancelled.json"]
     positions = _operation_positions(trace)

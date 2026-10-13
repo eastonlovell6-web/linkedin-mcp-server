@@ -201,3 +201,142 @@ async def test_retry_after_failed_write_is_not_occupied(dom_page):
 
     assert first in {"invalid", "unsupported"}
     assert second == "written"
+
+
+def thread_composer_html(script: str) -> str:
+    """A composer beside a thread list, with a page script for the editor."""
+    return (
+        composer_html().replace(
+            "<form>",
+            '<div id="thread"><div data-view-name="message-list-item" '
+            'data-event-urn="urn:li:msg_message:old">Earlier</div></div><form>',
+        )
+        + f"""<script>
+      const editor = document.querySelector('[contenteditable=true]');
+      editor.addEventListener('input', e => {{
+        if (e.inputType === 'deleteContentBackward') {{
+          document.documentElement.dataset.cleared = 'yes';
+        }}
+      }});
+      {script}
+    </script>"""
+    )
+
+
+async def _cleared(page):
+    return await page.evaluate("() => document.documentElement.dataset.cleared")
+
+
+async def test_editor_emptied_by_a_paragraph_break_diverges_without_clearing(
+    dom_page,
+):
+    # Send without a synchronous message item: only the emptied editor shows it.
+    await _set_composer_content(
+        dom_page,
+        thread_composer_html(
+            """editor.addEventListener('input', e => {
+                 if (e.inputType === 'insertParagraph') {
+                   editor.textContent = '';
+                 }
+               });"""
+        ),
+    )
+    sender, owner = await _owner(dom_page)
+    written = await sender._write_verified_message(
+        PITCH, target=_message_target(), owner=owner
+    )
+    text, clicked = await _text_and_clicked(dom_page)
+    cleared = await _cleared(dom_page)
+    await sender._dispose_message_owner(owner)
+
+    assert written == "diverged"
+    assert text.strip() == ""
+    assert cleared is None
+    assert clicked is None
+
+
+async def test_new_thread_item_during_write_diverges_without_clearing(dom_page):
+    # Send that leaves the text in place: only the new thread item shows it.
+    await _set_composer_content(
+        dom_page,
+        thread_composer_html(
+            """editor.addEventListener('input', e => {
+                 if (e.inputType === 'insertParagraph' &&
+                     !document.documentElement.dataset.sent) {
+                   document.documentElement.dataset.sent = 'yes';
+                   const item = document.createElement('div');
+                   item.setAttribute('data-view-name', 'message-list-item');
+                   item.textContent = editor.innerText;
+                   document.getElementById('thread').appendChild(item);
+                 }
+               });"""
+        ),
+    )
+    sender, owner = await _owner(dom_page)
+    written = await sender._write_verified_message(
+        PITCH, target=_message_target(), owner=owner
+    )
+    text, clicked = await _text_and_clicked(dom_page)
+    cleared = await _cleared(dom_page)
+    await sender._dispose_message_owner(owner)
+
+    assert written == "diverged"
+    assert text.strip() != ""
+    assert cleared is None
+    assert clicked is None
+
+
+async def test_rerendered_thread_item_with_a_known_urn_is_not_a_send(dom_page):
+    # A list re-render replaces the element but keeps its server URN.
+    await _set_composer_content(
+        dom_page,
+        thread_composer_html(
+            """editor.addEventListener('input', e => {
+                 if (e.inputType === 'insertParagraph') {
+                   const old = document.querySelector('[data-view-name="message-list-item"]');
+                   old.replaceWith(old.cloneNode(true));
+                 }
+               });"""
+        ),
+    )
+    sender, owner = await _owner(dom_page)
+    written = await sender._write_verified_message(
+        PITCH, target=_message_target(), owner=owner
+    )
+    await sender._dispose_message_owner(owner)
+
+    assert written == "written"
+
+
+async def test_single_line_does_not_need_insert_paragraph(dom_page):
+    await _set_composer_content(dom_page, composer_html())
+    await dom_page.evaluate(
+        """() => {
+          const real = document.queryCommandSupported.bind(document);
+          document.queryCommandSupported = command =>
+            command === 'insertParagraph' ? false : real(command);
+        }"""
+    )
+    sender, owner = await _owner(dom_page)
+    single = await sender._write_verified_message(
+        "One line only", target=_message_target(), owner=owner
+    )
+    await sender._dispose_message_owner(owner)
+    await _set_composer_content(dom_page, composer_html())
+    await dom_page.evaluate(
+        """() => {
+          const real = document.queryCommandSupported.bind(document);
+          document.queryCommandSupported = command =>
+            command === 'insertParagraph' ? false : real(command);
+        }"""
+    )
+    sender, owner = await _owner(dom_page)
+    multi = await sender._write_verified_message(
+        PITCH, target=_message_target(), owner=owner
+    )
+    text, _ = await _text_and_clicked(dom_page)
+    await sender._dispose_message_owner(owner)
+
+    assert single == "written"
+    assert multi == "unsupported"
+    assert text.strip() == ""

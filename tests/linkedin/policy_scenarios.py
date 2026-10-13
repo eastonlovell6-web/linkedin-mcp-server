@@ -725,6 +725,29 @@ async def _occupied_message_scenario(*, restored_during_write: bool) -> dict[str
     )
 
 
+async def _write_diverged_message_scenario() -> dict[str, Any]:
+    recorder = TraceRecorder("send_message__write_diverged", _COMMON_ALLOWED)
+    clock = FakeClock(recorder)
+    page = _page(recorder)
+    _script_message_surface(page, states=(_VALID_COMPOSER, _VALID_COMPOSER))
+    # No cleanup is scripted: a diverged write may have sent part of the text.
+    _script_message_owner(page, write="diverged")
+    extractor = _extractor(page)
+    async with boundaries(recorder, clock):
+        with recorder.context("send_message", "message"):
+            result = await extractor.send_message(
+                "ada-lovelace", "New text", confirm_send=True
+            )
+    page.assert_clean()
+    return recorder.trace(
+        {
+            "method": "send_message",
+            "arguments": {"confirm_send": True, "write_outcome": "diverged"},
+        },
+        result,
+    )
+
+
 async def _messaging_submission_scenario(outcome: str) -> dict[str, Any]:
     recorder = TraceRecorder(f"send_message__{outcome}", _COMMON_ALLOWED)
     clock = FakeClock(recorder)
@@ -1180,6 +1203,7 @@ async def build_policy_traces() -> dict[str, dict[str, Any]]:
         "message-composer-restored.json": await _occupied_message_scenario(
             restored_during_write=True
         ),
+        "message-write-diverged.json": await _write_diverged_message_scenario(),
         "message-pre-submit-cleanup.json": await _messaging_submission_scenario(
             "pre_submit_cleanup"
         ),

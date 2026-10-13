@@ -154,8 +154,18 @@ _MESSAGE_TEXT_JS = r"""
     const sameMessage = (a, b) => canonicalMessage(a) === canonicalMessage(b);
 """
 
+# Shared by every program that baselines the conversation: the message items
+# on the page, and the event URN that names one across a re-render.
+_MESSAGE_ITEMS_JS = r"""
+    const messageItems = () => Array.from(
+        document.querySelectorAll('[data-view-name="message-list-item"]')
+    );
+    const messageItemUrn = item => (item.getAttribute('data-event-urn') || '').trim();
+"""
+
 _MESSAGE_COMPOSER_INSPECT_JS = (
     _MESSAGE_TEXT_JS
+    + _MESSAGE_ITEMS_JS
     + r"""
     const visible = element => {
         const visibility = element && getComputedStyle(element).visibility;
@@ -517,16 +527,12 @@ _MESSAGE_CONFIRMATION_PREPARE_JS = (
             }
             refresh();
         });
-        state.baseline = new Set(
-            document.querySelectorAll('[data-view-name="message-list-item"]')
-        );
+        state.baseline = new Set(messageItems());
         // Kept as an attribute: the readiness check runs in another world,
         // where properties set on elements here are not visible.
         marker.setAttribute('data-linkedin-mcp-route', window.location.pathname);
         marker.setAttribute('data-linkedin-mcp-baseline', JSON.stringify(
-            Array.from(state.baseline)
-                .map(node => (node.getAttribute('data-event-urn') || '').trim())
-                .filter(Boolean)
+            Array.from(state.baseline).map(messageItemUrn).filter(Boolean)
         ));
         state.observer.observe(state.scope, {
             attributes: true,
@@ -781,6 +787,7 @@ _MESSAGE_COMPOSER_FOCUS_JS = (
 
 _MESSAGE_COMPOSER_PINNED_JS = (
     _MESSAGE_TEXT_JS
+    + _MESSAGE_ITEMS_JS
     + r"""
     const visible = element => {
         const visibility = element && getComputedStyle(element).visibility;
@@ -961,7 +968,8 @@ _MESSAGE_COMPOSER_WRITE_JS = (
         if (
             typeof document.queryCommandSupported !== 'function' ||
             !document.queryCommandSupported('insertText') ||
-            !document.queryCommandSupported('insertParagraph') ||
+            (arg.message.includes('\n') &&
+                !document.queryCommandSupported('insertParagraph')) ||
             typeof document.execCommand !== 'function'
         ) {
             return 'unsupported';
@@ -981,19 +989,65 @@ _MESSAGE_COMPOSER_WRITE_JS = (
                 inputType: 'deleteContentBackward',
             }));
         };
+        // An editor could take a programmatic paragraph break as Send: the
+        // lines so far would leave and the composer would empty. Every command
+        // is therefore checked against the thread, baselined the way the send
+        // confirmation baselines it, and against the lines inserted so far.
+        // A mismatch that keeps every inserted character in the composer, with
+        // the thread unchanged, is only 'garbled' layout or order: nothing can
+        // have left, and the attempt is cleared. A new thread item or a lost
+        // character is 'diverged', which may be a partial send, so the
+        // composer is left exactly as it is.
+        const baselineItems = new Set(messageItems());
+        const baselineUrns = new Set(
+            Array.from(baselineItems).map(messageItemUrn).filter(Boolean)
+        );
+        const threadGrew = () => messageItems().some(
+            item => !baselineItems.has(item) && !baselineUrns.has(messageItemUrn(item))
+        );
+        const characters = value => Array.from(
+            (value || '').replace(/[\s\u200b-\u200d\ufeff]+/g, '')
+        );
+        const keepsEvery = (text, expected) => {
+            const counts = new Map();
+            for (const character of characters(text)) {
+                counts.set(character, (counts.get(character) || 0) + 1);
+            }
+            return characters(expected).every(character => {
+                const left = counts.get(character) || 0;
+                counts.set(character, left - 1);
+                return left > 0;
+            });
+        };
+        const check = expectations => {
+            if (threadGrew()) return 'diverged';
+            const text = editor.innerText || editor.textContent || '';
+            if (expectations.some(expected => sameMessage(text, expected))) return 'ok';
+            return expectations.some(expected => keepsEvery(text, expected))
+                ? 'garbled'
+                : 'diverged';
+        };
         const lines = arg.message.split('\n');
         let inserted = true;
-        for (let index = 0; index < lines.length && inserted; index += 1) {
-            if (index > 0) {
-                inserted = document.execCommand('insertParagraph', false) === true;
-            }
-            if (inserted && lines[index].length > 0) {
-                inserted = document.execCommand('insertText', false, lines[index]) === true;
+        let progress = 'ok';
+        const run = (command, value, before, after) => {
+            inserted = document.execCommand(command, false, value) === true;
+            // A command that reports failure may or may not have applied.
+            progress = check(inserted ? [after] : [before, after]);
+            return inserted && progress === 'ok';
+        };
+        for (let index = 0; index < lines.length; index += 1) {
+            const before = lines.slice(0, index).join('\n');
+            const after = lines.slice(0, index + 1).join('\n');
+            if (index > 0 && !run('insertParagraph', undefined, before, before)) break;
+            if (lines[index].length > 0 && !run('insertText', lines[index], before, after)) {
+                break;
             }
         }
-        if (inserted !== true) {
+        if (progress === 'diverged') return 'diverged';
+        if (inserted !== true || progress !== 'ok') {
             clearAttempt();
-            return 'unsupported';
+            return inserted !== true ? 'unsupported' : 'invalid';
         }
         if (sameMessage(editor.innerText || editor.textContent || '', arg.message)) {
             pinned.ownedMessage = arg.message;
@@ -1373,7 +1427,9 @@ class MessageSender:
             _MESSAGE_COMPOSER_WRITE_JS,
             {**self._message_target_argument(target), "message": message},
         )
-        return result if result in {"written", "occupied", "unsupported"} else "invalid"
+        if result in {"written", "occupied", "unsupported", "diverged"}:
+            return result
+        return "invalid"
 
     async def _wait_for_verified_submit(
         self,
@@ -1767,6 +1823,22 @@ class MessageSender:
                     target=target,
                     owner=owner,
                 )
+                if write_result == "diverged":
+                    # The editor lost text or the thread gained a message while
+                    # the text went in, which is what an editor taking a
+                    # paragraph break as Send looks like. Part of the message
+                    # may have left, so the composer is not cleared.
+                    may_have_submitted = True
+                    return contracts.message_action_result(
+                        self._page.url,
+                        "send_unconfirmed",
+                        "The message editor diverged from the text being written "
+                        "and part of the message may already have been sent. "
+                        "Check the conversation before retrying; retrying may "
+                        "deliver the message twice.",
+                        recipient_selected=recipient_selected,
+                        retry_safe=False,
+                    )
                 if not _message_page_url_is_safe(self._page.url, target.profile_urn):
                     return contracts.message_action_result(
                         self._page.url,
