@@ -37,8 +37,8 @@ instances, clear profiles, or replace the user's browser session.
 
 ## Tool selection
 
-- Profiles: `get_my_profile`, `get_person_profile`, `search_people`, and
-  `get_sidebar_profiles`.
+- Profiles: `get_my_profile`, `get_person_profile`, `search_people`,
+  `get_sidebar_profiles`, and `get_recent_connections`.
 - Companies: `get_company_profile`, `get_company_posts`, `search_companies`,
   and `get_company_employees`.
 - Jobs: `search_jobs`, `get_saved_jobs`, and `get_job_details`.

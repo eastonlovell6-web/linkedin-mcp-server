@@ -7,6 +7,7 @@ with configurable section selection.
 
 import json
 import logging
+from datetime import date
 from typing import Annotated, Any
 
 from fastmcp import Context, FastMCP
@@ -19,6 +20,10 @@ from linkedin_mcp_server.core.exceptions import AuthenticationError
 from linkedin_mcp_server.dependencies import get_ready_extractor, handle_auth_error
 from linkedin_mcp_server.error_handler import raise_tool_error
 from linkedin_mcp_server.linkedin import parse_person_sections
+from linkedin_mcp_server.linkedin.connections_page import (
+    DEFAULT_MAX_SCROLLS,
+    MAX_SCROLLS_CEILING,
+)
 from linkedin_mcp_server.linkedin.contracts import FilterValidationError
 from linkedin_mcp_server.linkedin.identifiers import normalize_person_identifier
 from linkedin_mcp_server.linkedin.search_urls import build_people_search_url
@@ -359,6 +364,58 @@ def register_person_tools(
                 raise_tool_error(relogin_exc, "get_sidebar_profiles")
         except Exception as e:
             raise_tool_error(e, "get_sidebar_profiles")  # NoReturn
+
+    @mcp.tool(
+        timeout=tool_timeout,
+        title="Get Recent Connections",
+        annotations={"readOnlyHint": True, "openWorldHint": True},
+        tags={"person"},
+    )
+    async def get_recent_connections(
+        since: str,
+        ctx: Context,
+        max_scrolls: int = DEFAULT_MAX_SCROLLS,
+    ) -> dict[str, Any]:
+        """
+        List the account's newest 1st-degree connections, newest first.
+
+        Reads My Network > Connections sorted by "Recently added" and scrolls
+        until a card older than ``since`` appears or ``max_scrolls`` is used up
+        (ceiling 10). Read-only.
+
+        Args:
+            since: ISO date (YYYY-MM-DD). Reading stops once a connection made
+                before this date is visible.
+            ctx: FastMCP context for progress reporting
+            max_scrolls: Load-more rounds after the first screen, default 5, max 10.
+
+        Returns:
+            Dict with url, sort, connections (name, headline, slug, profile_urn,
+            connected_on), reached_since and unparsed. An unexpected sort label
+            returns error "unexpected_sort" and no connections.
+        """
+        try:
+            since_date = date.fromisoformat(since)
+        except (TypeError, ValueError):
+            raise ToolError("since must be an ISO date (YYYY-MM-DD).") from None
+        max_scrolls = max(0, min(int(max_scrolls), MAX_SCROLLS_CEILING))
+        try:
+            extractor = await get_ready_extractor(
+                ctx, tool_name="get_recent_connections"
+            )
+            await ctx.report_progress(
+                progress=0, total=100, message="Reading connections"
+            )
+            result = await extractor.get_recent_connections(since_date, max_scrolls)
+            await ctx.report_progress(progress=100, total=100, message="Complete")
+            return result
+        except AuthenticationError as e:
+            try:
+                await handle_auth_error(e, ctx)
+            except Exception as relogin_exc:
+                raise_tool_error(relogin_exc, "get_recent_connections")
+        except Exception as e:
+            raise_tool_error(e, "get_recent_connections")  # NoReturn
 
     @mcp.tool(
         timeout=tool_timeout,

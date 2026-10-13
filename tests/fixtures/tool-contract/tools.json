@@ -475,6 +475,44 @@
     "_meta": {
       "fastmcp": {
         "tags": [
+          "person"
+        ]
+      }
+    },
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "List the account's newest 1st-degree connections, newest first.\n\nReads My Network > Connections sorted by \"Recently added\" and scrolls\nuntil a card older than ``since`` appears or ``max_scrolls`` is used up\n(ceiling 10). Read-only.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "max_scrolls": {
+          "default": 5,
+          "description": "Load-more rounds after the first screen, default 5, max 10.",
+          "type": "integer"
+        },
+        "since": {
+          "description": "ISO date (YYYY-MM-DD). Reading stops once a connection made\nbefore this date is visible.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "since"
+      ],
+      "type": "object"
+    },
+    "name": "get_recent_connections",
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "title": "Get Recent Connections"
+  },
+  {
+    "_meta": {
+      "fastmcp": {
+        "tags": [
           "job"
         ]
       }

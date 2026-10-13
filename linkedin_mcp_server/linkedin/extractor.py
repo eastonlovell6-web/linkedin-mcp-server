@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from patchright.async_api import Page
@@ -10,6 +11,7 @@ from linkedin_mcp_server.config.schema import DEFAULT_TOOL_TIMEOUT_SECONDS
 from linkedin_mcp_server.linkedin.capture import SectionCapture
 from linkedin_mcp_server.linkedin.company import CompanyReader
 from linkedin_mcp_server.linkedin.connection_actions import ConnectionActions
+from linkedin_mcp_server.linkedin.connections_page import ConnectionsPageReader
 from linkedin_mcp_server.linkedin.content import PageContentReader
 from linkedin_mcp_server.linkedin.contracts import (
     ExtractedSection as ExtractedSection,
@@ -56,6 +58,7 @@ class LinkedInExtractor:
         self._feed = FeedReader(session, navigator, content)
         self._message_sender = message_sender
         self._person = person
+        self._connections_page = ConnectionsPageReader(session, navigator)
         self._company = CompanyReader(session, capture)
         self._connection = ConnectionActions(
             session,
@@ -135,6 +138,12 @@ class LinkedInExtractor:
     async def get_sidebar_profiles(self, username: str) -> dict[str, Any]:
         """Extract profile links from sidebar sections on a profile page."""
         return await self._person.get_sidebar_profiles(username)
+
+    async def get_recent_connections(
+        self, since: date, max_scrolls: int
+    ) -> dict[str, Any]:
+        """Read the Connections page, newest first, back to before ``since``."""
+        return await self._connections_page.read(since, max_scrolls)
 
     async def read_company(
         self,

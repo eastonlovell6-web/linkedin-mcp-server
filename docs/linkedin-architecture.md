@@ -20,6 +20,7 @@ a page-owning collaborator.
 | `company` | `CompanyReader` | `browser-free` |
 | `connection` | `ActionSignals`, `ConnectionState`, `detect_connection_state()` | `browser-free` |
 | `connection_actions` | `ACTION_SIGNALS_JS`, `CLICK_INCOMING_ACCEPT_JS`, `ConnectionActions`, `OPEN_MORE_BUTTON_JS`, `ReadMainProfile` | `page-owning` |
+| `connections_page` | `CONNECTIONS_URL`, `CONNECTION_CARDS_JS`, `ConnectionsPageReader`, `DEFAULT_MAX_SCROLLS`, `EXPECTED_SORT`, `LOAD_MORE_JS`, `MAX_SCROLLS_CEILING`, `parse_connected_on()` | `page-owning` |
 | `content` | `PageContentReader` | `page-owning` |
 | `contracts` | `ExtractedSection`, `FilterValidationError`, `RATE_LIMITED_SECTION_TEXT`, `SEND_INTERRUPTED_WARNING`, `message_action_result()`, `rate_limited_section_error()`, `refuse_an_invalid_message()` | `browser-free` |
 | `conversations` | `ConversationReader`, `strip_select_conversation_prefix()` | `page-owning` |
@@ -48,10 +49,11 @@ a page-owning collaborator.
 - `company` -> `capture`, `contracts`, `fields`, `identifiers`, `link_metadata`, `search_urls`, `session`
 - `connection` -> _(none)_
 - `connection_actions` -> `connection`, `identifiers`, `navigation`, `session`
+- `connections_page` -> `navigation`, `session`
 - `content` -> `session`, `text`
 - `contracts` -> `identifiers`, `link_metadata`
 - `conversations` -> `content`, `identifiers`, `link_metadata`, `navigation`, `profile_page`, `session`, `text`
-- `extractor` -> `capture`, `company`, `connection_actions`, `content`, `contracts`, `conversations`, `feed`, `job_pages`, `jobs`, `message_sender`, `navigation`, `person`, `posts`, `profile_page`, `session`, `text`
+- `extractor` -> `capture`, `company`, `connection_actions`, `connections_page`, `content`, `contracts`, `conversations`, `feed`, `job_pages`, `jobs`, `message_sender`, `navigation`, `person`, `posts`, `profile_page`, `session`, `text`
 - `feed` -> `content`, `contracts`, `feed_payload`, `navigation`, `session`, `text`
 - `feed_payload` -> `link_metadata`
 - `fields` -> `capture`
@@ -80,6 +82,7 @@ a page-owning collaborator.
 - `get_inbox`
 - `get_my_profile`
 - `get_page_text`
+- `get_recent_connections`
 - `get_saved_jobs`
 - `get_sidebar_profiles`
 - `read_company`
@@ -97,6 +100,7 @@ a page-owning collaborator.
 - `_capture`
 - `_company`
 - `_connection`
+- `_connections_page`
 - `_content`
 - `_conversations`
 - `_feed`

@@ -1,10 +1,12 @@
 import asyncio
 import logging
+from datetime import date
 from typing import Any, Callable, Coroutine, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.tools import FunctionTool
 
 from linkedin_mcp_server.callbacks import MCPContextProgressCallback
@@ -36,6 +38,7 @@ def _make_mock_extractor(result: dict) -> MagicMock:
     mock.get_saved_jobs = AsyncMock(return_value=result)
     mock.search_people = AsyncMock(return_value=result)
     mock.get_sidebar_profiles = AsyncMock(return_value=result)
+    mock.get_recent_connections = AsyncMock(return_value=result)
     mock.get_inbox = AsyncMock(return_value=result)
     mock.get_conversation = AsyncMock(return_value=result)
     mock.search_conversations = AsyncMock(return_value=result)
@@ -264,6 +267,49 @@ async def test_valid_input_reaches_the_patched_readiness_call(
     ready.assert_awaited_once()
     assert ready.await_args is not None
     assert ready.await_args.kwargs == {"tool_name": tool_name}
+
+
+class TestGetRecentConnectionsTool:
+    async def _tool(self, mcp_factory, serve_extractor, extractor):
+        from linkedin_mcp_server.tools.person import register_person_tools
+
+        mcp = FastMCP("test")
+        register_person_tools(mcp)
+        serve_extractor(extractor)
+        return await get_tool_fn(mcp, "get_recent_connections")
+
+    async def test_success(self, mock_context, serve_extractor):
+        expected = {
+            "url": "u",
+            "sort": "Recently added",
+            "connections": [],
+            "reached_since": True,
+            "unparsed": 0,
+        }
+        mock_extractor = _make_mock_extractor(expected)
+        tool_fn = await self._tool(None, serve_extractor, mock_extractor)
+        result = await tool_fn("2026-10-12", mock_context)
+        assert result == expected
+        mock_extractor.get_recent_connections.assert_awaited_once_with(
+            date(2026, 10, 12), 5
+        )
+
+    async def test_rejects_bad_since_without_browser(
+        self, mock_context, serve_extractor
+    ):
+        mock_extractor = _make_mock_extractor({})
+        tool_fn = await self._tool(None, serve_extractor, mock_extractor)
+        with pytest.raises(ToolError, match="since must be an ISO date"):
+            await tool_fn("yesterday", mock_context)
+        mock_extractor.get_recent_connections.assert_not_awaited()
+
+    async def test_clamps_max_scrolls(self, mock_context, serve_extractor):
+        mock_extractor = _make_mock_extractor({"connections": []})
+        tool_fn = await self._tool(None, serve_extractor, mock_extractor)
+        await tool_fn("2026-10-12", mock_context, max_scrolls=50)
+        mock_extractor.get_recent_connections.assert_awaited_once_with(
+            date(2026, 10, 12), 10
+        )
 
 
 class TestPersonTool:

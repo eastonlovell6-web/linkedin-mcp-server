@@ -64,6 +64,10 @@
       "description": "Extract profile URLs from LinkedIn sidebar recommendation sections on a profile page"
     },
     {
+      "name": "get_recent_connections",
+      "description": "List your newest 1st-degree connections (read-only)."
+    },
+    {
       "name": "get_company_profile",
       "description": "Extract comprehensive company information and details. About-section references may include a company_urn entry carrying the numeric id LinkedIn's people-search uses in its currentCompany URL facet."
     },

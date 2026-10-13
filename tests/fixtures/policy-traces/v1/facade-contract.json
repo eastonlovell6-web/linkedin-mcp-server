@@ -48,6 +48,10 @@
         "coroutine": true,
         "signature": "(self) -> 'str'"
       },
+      "get_recent_connections": {
+        "coroutine": true,
+        "signature": "(self, since: 'date', max_scrolls: 'int') -> 'dict[str, Any]'"
+      },
       "get_saved_jobs": {
         "coroutine": true,
         "signature": "(self, max_pages: 'int' = 3) -> 'dict[str, Any]'"
@@ -101,6 +105,7 @@
       "get_conversation",
       "get_inbox",
       "get_my_profile",
+      "get_recent_connections",
       "get_saved_jobs",
       "get_sidebar_profiles",
       "read_company",
@@ -425,6 +430,30 @@
           },
           "required": [
             "linkedin_username"
+          ],
+          "type": "object"
+        },
+        "output": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "get_recent_connections": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "max_scrolls": {
+              "default": 5,
+              "description": "Load-more rounds after the first screen, default 5, max 10.",
+              "type": "integer"
+            },
+            "since": {
+              "description": "ISO date (YYYY-MM-DD). Reading stops once a connection made\nbefore this date is visible.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "since"
           ],
           "type": "object"
         },

@@ -598,6 +598,8 @@ def semantic_program_id(program: str) -> str:
         ("performance.timeOrigin", "document_origin"),
         ("MAX_HEADING_CONTAINERS", "root_content"),
         ("SIDEBAR_SECTIONS", "sidebar_profiles"),
+        ("ConnectionCard_", "connection_cards"),
+        ("Show more results", "connections_load_more"),
         ("showAllUrls", "sidebar_profiles"),
         ("hasInvite", "connection_action_signals"),
         ("expanded === 'false'", "open_more_button"),

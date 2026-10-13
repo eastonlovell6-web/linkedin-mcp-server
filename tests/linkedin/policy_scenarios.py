@@ -10,6 +10,7 @@ from typing import Any, cast
 from unittest.mock import patch
 
 import asyncio
+from datetime import date
 import inspect
 import json
 
@@ -972,6 +973,46 @@ async def _sidebar_scenario() -> dict[str, Any]:
     )
 
 
+async def _recent_connections_scenario() -> dict[str, Any]:
+    name = "get_recent_connections__baseline"
+    recorder = TraceRecorder(name, _COMMON_ALLOWED)
+    clock = FakeClock(recorder)
+    page = _page(recorder).script(
+        "evaluate:connection_cards",
+        {
+            "sort": "Recently added",
+            "cards": [
+                {
+                    "name": "Ada Lovelace",
+                    "headline": "Office Manager",
+                    "slug": "ada-lovelace",
+                    "profile_urn": "ACoAAAda",
+                    "connected_text": "Connected on October 13, 2026",
+                },
+                {
+                    "name": "Grace Hopper",
+                    "headline": "DDS",
+                    "slug": "grace-hopper",
+                    "profile_urn": "ACoAAGrace",
+                    "connected_text": "Connected on October 10, 2026",
+                },
+            ],
+        },
+    )
+    extractor = _extractor(page)
+    async with boundaries(recorder, clock):
+        with recorder.context("get_recent_connections", "connections"):
+            result = await extractor.get_recent_connections(date(2026, 10, 11), 5)
+    page.assert_clean()
+    return recorder.trace(
+        {
+            "method": "get_recent_connections",
+            "arguments": {"since": "2026-10-11", "max_scrolls": 5},
+        },
+        result,
+    )
+
+
 async def _conversation_scenario(method: str) -> dict[str, Any]:
     name = f"{method}__baseline"
     recorder = TraceRecorder(name, _COMMON_ALLOWED)
@@ -1083,6 +1124,7 @@ TOOL_FACADE_METHODS = {
     "get_conversation",
     "get_inbox",
     "get_my_profile",
+    "get_recent_connections",
     "get_saved_jobs",
     "get_sidebar_profiles",
     "read_company",
@@ -1156,6 +1198,7 @@ async def build_policy_traces() -> dict[str, dict[str, Any]]:
         "connect.json": await _connect_scenario(),
         "get-my-profile.json": await _get_my_profile_scenario(),
         "sidebar-profiles.json": await _sidebar_scenario(),
+        "recent-connections.json": await _recent_connections_scenario(),
         "company-employees.json": await _single_capture_facade_scenario(
             "get_company_employees"
         ),

@@ -1,0 +1,103 @@
+{
+  "call": {
+    "arguments": {
+      "max_scrolls": 5,
+      "since": "2026-10-11"
+    },
+    "method": "get_recent_connections"
+  },
+  "events": [
+    {
+      "call": "get_recent_connections",
+      "callback_id": "callback-1",
+      "event": "framenavigated",
+      "kind": "listener.add",
+      "section": "connections"
+    },
+    {
+      "call": "get_recent_connections",
+      "extra": {
+        "target_url": "https://www.linkedin.com/mynetwork/invite-connect/connections/",
+        "wait_until": "domcontentloaded"
+      },
+      "kind": "boundary.trace",
+      "label": "extractor-before-goto",
+      "section": "connections"
+    },
+    {
+      "call": "get_recent_connections",
+      "kind": "navigate",
+      "landed_url": "https://www.linkedin.com/mynetwork/invite-connect/connections/",
+      "requested_url": "https://www.linkedin.com/mynetwork/invite-connect/connections/",
+      "section": "connections",
+      "timeout_ms": 30000,
+      "wait_until": "domcontentloaded"
+    },
+    {
+      "call": "get_recent_connections",
+      "description": "goto https://www.linkedin.com/mynetwork/invite-connect/connections/",
+      "kind": "boundary.stabilize",
+      "result": null,
+      "section": "connections"
+    },
+    {
+      "call": "get_recent_connections",
+      "extra": {
+        "target_url": "https://www.linkedin.com/mynetwork/invite-connect/connections/",
+        "wait_until": "domcontentloaded"
+      },
+      "kind": "boundary.trace",
+      "label": "extractor-after-goto",
+      "section": "connections"
+    },
+    {
+      "call": "get_recent_connections",
+      "kind": "boundary.auth_quick",
+      "result": null,
+      "section": "connections"
+    },
+    {
+      "call": "get_recent_connections",
+      "callback_id": "callback-1",
+      "event": "framenavigated",
+      "kind": "listener.remove",
+      "section": "connections"
+    },
+    {
+      "call": "get_recent_connections",
+      "kind": "boundary.rate_limit",
+      "section": "connections"
+    },
+    {
+      "call": "get_recent_connections",
+      "kind": "evaluate",
+      "operation": "connection_cards",
+      "program_digest": "6f98e1497b13",
+      "section": "connections"
+    }
+  ],
+  "result": {
+    "connections": [
+      {
+        "connected_on": "2026-10-13",
+        "headline": "Office Manager",
+        "name": "Ada Lovelace",
+        "profile_urn": "ACoAAAda",
+        "slug": "ada-lovelace"
+      },
+      {
+        "connected_on": "2026-10-10",
+        "headline": "DDS",
+        "name": "Grace Hopper",
+        "profile_urn": "ACoAAGrace",
+        "slug": "grace-hopper"
+      }
+    ],
+    "reached_since": true,
+    "sort": "Recently added",
+    "unparsed": 0,
+    "url": "https://www.linkedin.com/mynetwork/invite-connect/connections/"
+  },
+  "scenario": "get_recent_connections__baseline",
+  "schema_version": 1
+}
