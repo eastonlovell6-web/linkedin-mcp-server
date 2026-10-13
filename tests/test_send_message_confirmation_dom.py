@@ -98,6 +98,28 @@ ID_TRANSITION_SEND_JS = """
   });
 """
 
+PARAGRAPH_BUBBLE_SEND_JS = """
+  document.getElementById('send').addEventListener('click', event => {
+    event.preventDefault();
+    document.body.dataset.clicked = String(
+      Number(document.body.dataset.clicked || 0) + 1);
+    const composer = document.getElementById('composer');
+    const lines = composer.innerText.split('\\n').filter(l => l.trim());
+    const entry = messageItem('', 'client-opaque-id');
+    const unit = entry.querySelector('.message-unit');
+    for (const line of lines) {
+      const p = document.createElement('p');
+      p.textContent = line;
+      unit.appendChild(p);
+    }
+    document.getElementById('thread').appendChild(entry);
+    setTimeout(() => {
+      entry.setAttribute('data-event-urn', 'server-opaque-id');
+    }, 0);
+    composer.textContent = '';
+  });
+"""
+
 REPARENTED_BASELINE_SEND_JS = """
   document.getElementById('send').addEventListener('click', event => {
     event.preventDefault();
@@ -1068,6 +1090,19 @@ class TestSendConfirmationDom:
         assert result["retry_safe"] is True
         assert await dom_page.evaluate("document.body.dataset.clicked") is None
         assert (await dom_page.locator("#composer").inner_text()).strip() == ""
+
+    async def test_multi_paragraph_bubble_confirms_once(self, dom_page):
+        message = "Hi Ada.\n\nOne line.\nTwo lines."
+        result = await send(
+            dom_page, compose_page(PARAGRAPH_BUBBLE_SEND_JS), message=message
+        )
+
+        assert result["status"] == "sent"
+        assert result["sent"] is True
+        assert await dom_page.evaluate("document.body.dataset.clicked") == "1"
+        entries = dom_page.locator("#thread .msg")
+        assert await entries.count() == 2
+        assert await entries.last.locator("p").count() == 3
 
     async def test_local_bubble_without_id_transition_is_not_confirmed(self, dom_page):
         result = await send(dom_page, compose_page(FIXED_ID_BUBBLE_JS))

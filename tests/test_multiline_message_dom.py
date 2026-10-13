@@ -119,3 +119,85 @@ async def test_multiline_write_then_submit_clicks_once(dom_page):
 
     assert written == "written"
     assert submitted == "clicked"
+
+
+async def _text_and_clicked(page):
+    text = await page.evaluate(
+        "() => document.querySelector('[contenteditable=true]').innerText"
+    )
+    clicked = await page.locator("form button").get_attribute("data-clicked")
+    return text, clicked
+
+
+async def test_garbled_insert_is_cleared_and_never_submitted(dom_page):
+    # The editor flattens paragraph breaks, so the read-back no longer matches.
+    await _set_composer_content(
+        dom_page,
+        composer_html()
+        + """<script>
+        document.querySelector('[contenteditable=true]').addEventListener(
+          'input', e => { if (e.inputType === 'insertParagraph') {
+            e.target.textContent = e.target.textContent; } });
+        </script>""",
+    )
+    sender, owner = await _owner(dom_page)
+    written = await sender._write_verified_message(
+        PITCH, target=_message_target(), owner=owner
+    )
+    text, clicked = await _text_and_clicked(dom_page)
+    await sender._dispose_message_owner(owner)
+
+    assert written in {"invalid", "unsupported"}
+    assert text.strip() == ""
+    assert clicked is None
+
+
+async def test_execcommand_failing_partway_clears_partial_text(dom_page):
+    await _set_composer_content(dom_page, composer_html())
+    sender, owner = await _owner(dom_page)
+    await dom_page.evaluate(
+        """() => {
+          const real = document.execCommand.bind(document);
+          let calls = 0;
+          document.execCommand = (...args) => (++calls > 3 ? false : real(...args));
+        }"""
+    )
+    written = await sender._write_verified_message(
+        PITCH, target=_message_target(), owner=owner
+    )
+    text, clicked = await _text_and_clicked(dom_page)
+    await sender._dispose_message_owner(owner)
+
+    assert written == "unsupported"
+    assert text.strip() == ""
+    assert clicked is None
+
+
+async def test_retry_after_failed_write_is_not_occupied(dom_page):
+    await _set_composer_content(
+        dom_page,
+        composer_html()
+        + """<script>
+        document.documentElement.dataset.drop = 'yes';
+        document.querySelector('[contenteditable=true]').addEventListener(
+          'input', e => {
+            if (document.documentElement.dataset.drop && e.inputType === 'insertParagraph') {
+              e.target.textContent = e.target.textContent;
+            }
+          });
+        </script>""",
+    )
+    sender, owner = await _owner(dom_page)
+    first = await sender._write_verified_message(
+        PITCH, target=_message_target(), owner=owner
+    )
+    await sender._dispose_message_owner(owner)
+    await dom_page.evaluate("() => { delete document.documentElement.dataset.drop; }")
+    sender, owner = await _owner(dom_page)  # a retry is a new tool call
+    second = await sender._write_verified_message(
+        PITCH, target=_message_target(), owner=owner
+    )
+    await sender._dispose_message_owner(owner)
+
+    assert first in {"invalid", "unsupported"}
+    assert second == "written"

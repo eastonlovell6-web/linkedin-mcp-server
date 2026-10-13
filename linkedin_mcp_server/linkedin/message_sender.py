@@ -966,20 +966,38 @@ _MESSAGE_COMPOSER_WRITE_JS = (
         ) {
             return 'unsupported';
         }
+        // The composer was proven empty and focused above, so whatever it holds
+        // after a failed or mismatched insert is ours to clear.
+        // Only when the pinned identity still holds: if the page moved or the
+        // composer changed hands, what it holds may not be ours.
+        const clearAttempt = () => {
+            if (!validatePinned(arg, false)) return;
+            if (!editor.isConnected || !owner.contains(editor)) return;
+            editor.replaceChildren();
+            editor.dispatchEvent(new InputEvent('input', {
+                bubbles: true,
+                composed: true,
+                data: null,
+                inputType: 'deleteContentBackward',
+            }));
+        };
         const lines = arg.message.split('\n');
         let inserted = true;
-        lines.forEach((line, index) => {
+        for (let index = 0; index < lines.length && inserted; index += 1) {
             if (index > 0) {
-                inserted = document.execCommand('insertParagraph', false) === true && inserted;
+                inserted = document.execCommand('insertParagraph', false) === true;
             }
-            if (line.length > 0) {
-                inserted = document.execCommand('insertText', false, line) === true && inserted;
+            if (inserted && lines[index].length > 0) {
+                inserted = document.execCommand('insertText', false, lines[index]) === true;
             }
-        });
+        }
+        if (inserted !== true) {
+            clearAttempt();
+            return 'unsupported';
+        }
         if (sameMessage(editor.innerText || editor.textContent || '', arg.message)) {
             pinned.ownedMessage = arg.message;
         }
-        if (inserted !== true) return 'unsupported';
         pinned = validatePinned(arg, false);
         if (
             !pinned ||
@@ -987,6 +1005,7 @@ _MESSAGE_COMPOSER_WRITE_JS = (
             pinned.ownedMessage !== arg.message ||
             !sameMessage(editor.innerText || editor.textContent || '', arg.message)
         ) {
+            clearAttempt();
             return 'invalid';
         }
         return 'written';
