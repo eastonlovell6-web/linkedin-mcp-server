@@ -559,6 +559,7 @@ def semantic_selector_id(selector: str) -> str:
         "main": "main",
         "[role='menu']": "profile_more_menu",
         "main li label[aria-label]": "conversation_rows",
+        'div[componentkey^="ConnectionCard_"]': "connection_cards",
     }
     if selector in selectors:
         return selectors[selector]

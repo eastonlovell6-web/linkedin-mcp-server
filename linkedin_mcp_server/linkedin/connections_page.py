@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 import random
 import re
 from datetime import date, datetime
 from typing import Any
 
+from patchright.async_api import TimeoutError as PlaywrightTimeoutError
+
 from linkedin_mcp_server.linkedin.navigation import PageNavigator
 from linkedin_mcp_server.linkedin.session import PageSession
+
+logger = logging.getLogger(__name__)
 
 CONNECTIONS_URL = "https://www.linkedin.com/mynetwork/invite-connect/connections/"
 EXPECTED_SORT = "Recently added"
 DEFAULT_MAX_SCROLLS = 5
 MAX_SCROLLS_CEILING = 10
+CONNECTION_CARD_SELECTOR = 'div[componentkey^="ConnectionCard_"]'
 
 # Cards are found by LinkedIn's componentkey (ConnectionCard_<n>-<slug>), not by
 # layout classes, which are hashed and change between deploys (DOM capture 2026-10-13).
@@ -22,9 +28,17 @@ CONNECTION_CARDS_JS = r"""() => {
     const sortNode = Array.from(main.querySelectorAll('button, [role="button"]'))
         .find(node => /Sort by:/.test(node.innerText || ''));
     const sortMatch = sortNode && (sortNode.innerText || '').match(/Sort by:\s*([^\n]+)/);
+    // A malformed percent-escape nulls that one field instead of failing the read.
+    const decoded = value => {
+        try {
+            return decodeURIComponent(value);
+        } catch {
+            return null;
+        }
+    };
     const slugOf = href => {
         const match = (href || '').match(/^(?:https:\/\/www\.linkedin\.com)?\/in\/([^/?#]+)\/?/);
-        return match ? decodeURIComponent(match[1]) : null;
+        return match ? decoded(match[1]) : null;
     };
     const cards = Array.from(main.querySelectorAll('div[componentkey^="ConnectionCard_"]')).map(card => {
         const profileAnchor = Array.from(card.querySelectorAll('a[href*="/in/"]'))
@@ -37,7 +51,7 @@ CONNECTION_CARDS_JS = r"""() => {
             .map(p => (p.innerText || '').replace(/\s+/g, ' ').trim())
             .find(text => /^Connected on /.test(text)) || null;
         const message = card.querySelector('a[href*="/messaging/compose/"]');
-        const urnMatch = message && decodeURIComponent(message.getAttribute('href') || '')
+        const urnMatch = message && (decoded(message.getAttribute('href') || '') || '')
             .match(/fsd_profile:([A-Za-z0-9_-]+)/);
         return {
             name: paragraphs[0] || null,
@@ -84,6 +98,14 @@ class ConnectionsPageReader:
         await self._navigator._navigate_to_page(CONNECTIONS_URL)
         await self._session.check_rate_limit()
         page = self._session.page
+        # The cards render after the page shell, so a snapshot taken at once can
+        # read an empty list. A timeout falls through to that empty read.
+        try:
+            await page.wait_for_selector(
+                CONNECTION_CARD_SELECTOR, state="attached", timeout=10000
+            )
+        except PlaywrightTimeoutError:
+            logger.debug("connection cards did not appear within 10s")
         snapshot = await page.evaluate(CONNECTION_CARDS_JS)
         if snapshot.get("sort") != EXPECTED_SORT:
             return {
@@ -94,14 +116,18 @@ class ConnectionsPageReader:
                 "unparsed": 0,
                 "error": "unexpected_sort",
             }
+        # A virtualized list can drop the newest cards from the DOM while it
+        # renders older ones, so every snapshot is merged in first-seen order.
+        cards = self._merge([], snapshot.get("cards", []))
         scrolls = 0
-        while not self._reached(snapshot, since) and scrolls < max_scrolls:
+        while not self._reached(cards, since) and scrolls < max_scrolls:
             await page.evaluate(LOAD_MORE_JS)
             scrolls += 1
             await self._session.delay(random.uniform(1.5, 3.0))
             snapshot = await page.evaluate(CONNECTION_CARDS_JS)
+            cards = self._merge(cards, snapshot.get("cards", []))
         connections, unparsed = [], 0
-        for card in snapshot.get("cards", []):
+        for card in cards:
             connected_on = parse_connected_on(card.get("connected_text"))
             if connected_on is None or card.get("slug") is None:
                 unparsed += 1
@@ -118,15 +144,32 @@ class ConnectionsPageReader:
             "url": page.url,
             "sort": EXPECTED_SORT,
             "connections": connections,
-            "reached_since": self._reached(snapshot, since),
+            "reached_since": self._reached(cards, since),
             "unparsed": unparsed,
         }
 
     @staticmethod
-    def _reached(snapshot: dict[str, Any], since: date) -> bool:
-        dates = [
-            parse_connected_on(c.get("connected_text"))
-            for c in snapshot.get("cards", [])
-        ]
+    def _card_key(card: dict[str, Any]) -> tuple[str, ...]:
+        slug = card.get("slug")
+        if slug is not None:
+            return ("slug", slug)
+        return ("name", card.get("name") or "", card.get("connected_text") or "")
+
+    @classmethod
+    def _merge(
+        cls, seen: list[dict[str, Any]], snapshot: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        merged = list(seen)
+        keys = {cls._card_key(card) for card in merged}
+        for card in snapshot:
+            key = cls._card_key(card)
+            if key not in keys:
+                keys.add(key)
+                merged.append(card)
+        return merged
+
+    @staticmethod
+    def _reached(cards: list[dict[str, Any]], since: date) -> bool:
+        dates = [parse_connected_on(c.get("connected_text")) for c in cards]
         known = [d for d in dates if d is not None]
         return bool(known) and min(known) < since

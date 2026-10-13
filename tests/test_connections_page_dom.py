@@ -6,7 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from patchright.async_api import TimeoutError as PlaywrightTimeoutError
+
 from linkedin_mcp_server.linkedin.connections_page import (
+    CONNECTION_CARD_SELECTOR,
     CONNECTION_CARDS_JS,
     CONNECTIONS_URL,
     ConnectionsPageReader,
@@ -129,10 +132,17 @@ async def test_card_without_slug_or_date_is_kept_and_counted(dom_page):  # noqa:
 
 
 class FakePage:
-    def __init__(self, snapshots):
+    def __init__(self, snapshots, wait_error=None):
         self.snapshots, self.scrolls, self.url = list(snapshots), 0, CONNECTIONS_URL
+        self.calls, self.wait_error = [], wait_error
+
+    async def wait_for_selector(self, selector, **kwargs):
+        self.calls.append(("wait_for_selector", selector, kwargs))
+        if self.wait_error is not None:
+            raise self.wait_error
 
     async def evaluate(self, script, *args):
+        self.calls.append(("evaluate", script))
         if script is CONNECTION_CARDS_JS:
             return self.snapshots[min(self.scrolls, len(self.snapshots) - 1)]
         self.scrolls += 1  # the scroll/"Load more" step
@@ -156,8 +166,8 @@ def raw(slug, connected):
     }
 
 
-def reader_for(snapshots):
-    page = FakePage(snapshots)
+def reader_for(snapshots, wait_error=None):
+    page = FakePage(snapshots, wait_error)
     navigator = MagicMock()
     navigator._navigate_to_page = AsyncMock()
     session = cast(PageSession, FakeSession(page))
@@ -237,4 +247,100 @@ async def test_reader_counts_unparsed_cards():
         "2026-10-13",
         None,
         "2026-10-01",
+    ]
+
+
+async def test_reader_waits_for_cards_before_the_first_snapshot():
+    snap = {
+        "sort": "Recently added",
+        "cards": [raw("old", "Connected on October 1, 2026")],
+    }
+    reader, page, _ = reader_for([snap])
+
+    await reader.read(date(2026, 10, 11))
+
+    assert page.calls[0] == (
+        "wait_for_selector",
+        CONNECTION_CARD_SELECTOR,
+        {"state": "attached", "timeout": 10000},
+    )
+    assert CONNECTION_CARD_SELECTOR == 'div[componentkey^="ConnectionCard_"]'
+
+
+async def test_reader_reads_anyway_when_cards_never_render():
+    snap = {"sort": "Recently added", "cards": []}
+    reader, page, _ = reader_for([snap], PlaywrightTimeoutError("no cards"))
+
+    result = await reader.read(date(2026, 10, 11), max_scrolls=0)
+
+    assert result["connections"] == []
+    assert result["reached_since"] is False
+
+
+async def test_reader_merges_snapshots_when_the_list_virtualizes():
+    first = {
+        "sort": "Recently added",
+        "cards": [
+            raw("ada", "Connected on October 13, 2026"),
+            raw("bob", "Connected on October 12, 2026"),
+        ],
+    }
+    # The list dropped "ada" from the DOM while rendering older cards.
+    second = {
+        "sort": "Recently added",
+        "cards": [
+            raw("bob", "Connected on October 12, 2026"),
+            raw("cy", "Connected on October 9, 2026"),
+        ],
+    }
+    reader, page, _ = reader_for([first, second])
+
+    result = await reader.read(date(2026, 10, 11), max_scrolls=5)
+
+    assert page.scrolls == 1
+    assert [c["slug"] for c in result["connections"]] == ["ada", "bob", "cy"]
+    assert result["reached_since"] is True
+
+
+async def test_reader_dedupes_slugless_cards_by_name_and_date():
+    slugless = {
+        "name": "No Link",
+        "headline": "x",
+        "slug": None,
+        "profile_urn": None,
+        "connected_text": "Connected on October 13, 2026",
+    }
+    first = {"sort": "Recently added", "cards": [slugless]}
+    second = {
+        "sort": "Recently added",
+        "cards": [slugless, raw("old", "Connected on October 1, 2026")],
+    }
+    reader, _, _ = reader_for([first, second])
+
+    result = await reader.read(date(2026, 10, 11), max_scrolls=5)
+
+    assert [c["name"] for c in result["connections"]] == ["No Link", "Old"]
+    assert result["unparsed"] == 1
+
+
+@pytest.mark.browser_dom
+@pytest.mark.xdist_group("browser_runtime")
+async def test_malformed_percent_encoding_nulls_only_that_card(dom_page):  # noqa: F811
+    bad_profile = card(0, "ok", "Bad Href", "x", "Connected on October 13, 2026")
+    bad_profile = bad_profile.replace(
+        "https://www.linkedin.com/in/ok/", "https://www.linkedin.com/in/bad%E0%A4%A/"
+    )
+    bad_urn = card(
+        1, "bad-urn", "Bad Urn", "y", "Connected on October 12, 2026"
+    ).replace("urn%3Ali%3Afsd_profile%3A", "urn%3Ali%E0%A4%A%3Afsd_profile%3A")
+    good = card(2, "good", "Good", "z", "Connected on October 11, 2026", "ACoAAGood")
+    await dom_page.set_content(page("Recently added", [bad_profile, bad_urn, good]))
+
+    result = await dom_page.evaluate(CONNECTION_CARDS_JS)
+
+    assert [c["slug"] for c in result["cards"]] == [None, "bad-urn", "good"]
+    assert [c["profile_urn"] for c in result["cards"]] == [
+        "ACoAATEST",
+        None,
+        "ACoAAGood",
     ]

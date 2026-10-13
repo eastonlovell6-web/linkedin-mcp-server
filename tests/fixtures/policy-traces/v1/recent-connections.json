@@ -70,9 +70,18 @@
     },
     {
       "call": "get_recent_connections",
+      "kind": "wait_for_selector",
+      "operation": "connection_cards",
+      "section": "connections",
+      "selector": "div[componentkey^=\"ConnectionCard_\"]",
+      "state": "attached",
+      "timeout_ms": 10000
+    },
+    {
+      "call": "get_recent_connections",
       "kind": "evaluate",
       "operation": "connection_cards",
-      "program_digest": "6f98e1497b13",
+      "program_digest": "abbb754172c2",
       "section": "connections"
     }
   ],
