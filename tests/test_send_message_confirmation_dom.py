@@ -1207,6 +1207,54 @@ class TestSendConfirmationDom:
         assert await dom_page.evaluate("document.body.dataset.clicked") is None
         assert (await dom_page.locator("#composer").inner_text()).strip() == ""
 
+    async def test_identical_multiline_history_confirms_the_new_send_once(
+        self, dom_page
+    ):
+        message = "Hi Ada.\n\nOne line.\nTwo lines."
+        earlier = """
+          <div class="msg" data-view-name="message-list-item"
+               data-event-urn="urn:li:msg_message:earlier">
+            <span class="message-unit"><p>Hi Ada.</p><p>One line.</p><p>Two lines.</p></span>
+          </div>
+        """
+        result = await send(
+            dom_page,
+            compose_page(PARAGRAPH_BUBBLE_SEND_JS, history_html=earlier),
+            message=message,
+        )
+
+        assert result["status"] == "sent"
+        assert result["sent"] is True
+        assert result["retry_safe"] is False
+        assert await dom_page.evaluate("document.body.dataset.clicked") == "1"
+        entries = dom_page.locator("#thread .msg")
+        assert await entries.count() == 3
+        assert await entries.nth(1).get_attribute("data-event-urn") == (
+            "urn:li:msg_message:earlier"
+        )
+        assert await entries.last.get_attribute("data-event-urn") == "server-opaque-id"
+
+    async def test_identical_multiline_history_is_not_a_confirmation(self, dom_page):
+        # The new bubble never gets an id transition, so only the earlier
+        # identical message could confirm it, and it must not.
+        message = "Hi Ada.\n\nOne line.\nTwo lines."
+        earlier = """
+          <div class="msg" data-view-name="message-list-item"
+               data-event-urn="urn:li:msg_message:earlier">
+            <span class="message-unit"><p>Hi Ada.</p><p>One line.</p><p>Two lines.</p></span>
+          </div>
+        """
+        result = await send(
+            dom_page,
+            compose_page(FIXED_ID_BUBBLE_JS, history_html=earlier),
+            message=message,
+        )
+
+        assert await dom_page.evaluate("document.body.dataset.clicked") == "true"
+        assert result["status"] == "send_unconfirmed"
+        assert result["sent"] is False
+        assert result["retry_safe"] is False
+
     async def test_local_bubble_without_id_transition_is_not_confirmed(self, dom_page):
         result = await send(dom_page, compose_page(FIXED_ID_BUBBLE_JS))
 
