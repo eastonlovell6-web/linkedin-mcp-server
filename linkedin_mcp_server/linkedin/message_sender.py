@@ -142,7 +142,21 @@ _MESSAGE_CLEANUP_TIMEOUT_SECONDS = 1.0
 # Narrow exception to the generic-selector rule for #1107: enterToSend uses
 # the send-toggle class only when the verified composer has no Send button.
 # If the class changes, confirmed sends remain unavailable.
-_MESSAGE_COMPOSER_INSPECT_JS = r"""
+# Shared by every composer snippet. Multi-line text renders as paragraphs whose
+# innerText can carry extra blank lines or trailing spaces, so message text is
+# compared by its non-empty lines, each with whitespace runs collapsed.
+_MESSAGE_TEXT_JS = r"""
+    const canonicalMessage = value => (value || '')
+        .split('\n')
+        .map(line => line.replace(/\s+/g, ' ').trim())
+        .filter(line => line.length > 0)
+        .join('\n');
+    const sameMessage = (a, b) => canonicalMessage(a) === canonicalMessage(b);
+"""
+
+_MESSAGE_COMPOSER_INSPECT_JS = (
+    _MESSAGE_TEXT_JS
+    + r"""
     const visible = element => {
         const visibility = element && getComputedStyle(element).visibility;
         return !!(
@@ -312,6 +326,7 @@ _MESSAGE_COMPOSER_INSPECT_JS = r"""
         return owner;
     };
 """
+)
 
 _MESSAGE_COMPOSER_OWNER_JS = (
     "(arg) => {"
@@ -378,7 +393,7 @@ _MESSAGE_CONFIRMATION_PREPARE_JS = (
             !arg.owner.contains(pinned.editor) ||
             document.activeElement !== pinned.editor ||
             pinned.ownedMessage !== arg.expected ||
-            (pinned.editor.innerText || pinned.editor.textContent || '') !== arg.expected
+            !sameMessage(pinned.editor.innerText || pinned.editor.textContent || '', arg.expected)
         ) {
             return null;
         }
@@ -407,7 +422,7 @@ _MESSAGE_CONFIRMATION_PREPARE_JS = (
                 element => !requireVisible || visible(element)
             );
             const matches = elements.filter(
-                element => (element.innerText || '') === state.expected
+                element => sameMessage(element.innerText || '', state.expected)
             );
             const smallest = matches.filter(
                 element => !matches.some(
@@ -536,7 +551,7 @@ _MESSAGE_CONFIRMATION_READY_JS = (
             if (!visible(node)) return false;
             const elements = [node, ...node.querySelectorAll('*')].filter(visible);
             const matches = elements.filter(
-                element => (element.innerText || '') === arg.expected
+                element => sameMessage(element.innerText || '', arg.expected)
             );
             return matches.filter(
                 element => !matches.some(
@@ -764,7 +779,9 @@ _MESSAGE_COMPOSER_FOCUS_JS = (
     }"""
 )
 
-_MESSAGE_COMPOSER_PINNED_JS = r"""
+_MESSAGE_COMPOSER_PINNED_JS = (
+    _MESSAGE_TEXT_JS
+    + r"""
     const visible = element => {
         const visibility = element && getComputedStyle(element).visibility;
         return !!(
@@ -923,6 +940,7 @@ _MESSAGE_COMPOSER_PINNED_JS = r"""
         return pinned;
     };
 """
+)
 
 _MESSAGE_COMPOSER_WRITE_JS = (
     "(owner, arg) => {"
@@ -943,12 +961,22 @@ _MESSAGE_COMPOSER_WRITE_JS = (
         if (
             typeof document.queryCommandSupported !== 'function' ||
             !document.queryCommandSupported('insertText') ||
+            !document.queryCommandSupported('insertParagraph') ||
             typeof document.execCommand !== 'function'
         ) {
             return 'unsupported';
         }
-        const inserted = document.execCommand('insertText', false, arg.message);
-        if ((editor.innerText || editor.textContent || '') === arg.message) {
+        const lines = arg.message.split('\n');
+        let inserted = true;
+        lines.forEach((line, index) => {
+            if (index > 0) {
+                inserted = document.execCommand('insertParagraph', false) === true && inserted;
+            }
+            if (line.length > 0) {
+                inserted = document.execCommand('insertText', false, line) === true && inserted;
+            }
+        });
+        if (sameMessage(editor.innerText || editor.textContent || '', arg.message)) {
             pinned.ownedMessage = arg.message;
         }
         if (inserted !== true) return 'unsupported';
@@ -957,7 +985,7 @@ _MESSAGE_COMPOSER_WRITE_JS = (
             !pinned ||
             document.activeElement !== editor ||
             pinned.ownedMessage !== arg.message ||
-            (editor.innerText || editor.textContent || '') !== arg.message
+            !sameMessage(editor.innerText || editor.textContent || '', arg.message)
         ) {
             return 'invalid';
         }
@@ -974,7 +1002,7 @@ _MESSAGE_COMPOSER_SUBMIT_READY_JS = (
             !pinned ||
             document.activeElement !== pinned.editor ||
             pinned.ownedMessage !== arg.message ||
-            (pinned.editor.innerText || pinned.editor.textContent || '') !== arg.message
+            !sameMessage(pinned.editor.innerText || pinned.editor.textContent || '', arg.message)
         ) {
             return 'invalid';
         }
@@ -985,7 +1013,10 @@ _MESSAGE_COMPOSER_SUBMIT_READY_JS = (
     }"""
 )
 
-_MESSAGE_COMPOSER_CLEANUP_JS = r"""(owner, arg) => {
+_MESSAGE_COMPOSER_CLEANUP_JS = (
+    "(owner, arg) => {"
+    + _MESSAGE_TEXT_JS
+    + r"""
     const pinned = owner?.__linkedinMcpComposer;
     if (!pinned || pinned.ownedMessage !== arg.message) return false;
     const {editor, ancestorChain} = pinned;
@@ -1005,7 +1036,7 @@ _MESSAGE_COMPOSER_CLEANUP_JS = r"""(owner, arg) => {
         currentChain.some((scope, index) => scope !== ancestorChain[index]) ||
         !currentChain.includes(owner) ||
         !owner.contains(editor) ||
-        (editor.innerText || editor.textContent || '') !== arg.message
+        !sameMessage(editor.innerText || editor.textContent || '', arg.message)
     ) {
         return false;
     }
@@ -1019,6 +1050,7 @@ _MESSAGE_COMPOSER_CLEANUP_JS = r"""(owner, arg) => {
     }));
     return true;
 }"""
+)
 
 _MESSAGE_COMPOSER_SUBMIT_JS = (
     "(owner, arg) => {"
@@ -1029,7 +1061,7 @@ _MESSAGE_COMPOSER_SUBMIT_JS = (
             !pinned ||
             document.activeElement !== pinned.editor ||
             pinned.ownedMessage !== arg.message ||
-            (pinned.editor.innerText || pinned.editor.textContent || '') !== arg.message
+            !sameMessage(pinned.editor.innerText || pinned.editor.textContent || '', arg.message)
         ) {
             return 'invalid';
         }
