@@ -9,6 +9,7 @@ import re
 import time
 from typing import Any, Literal
 from urllib.parse import ParseResult, parse_qs, urljoin, urlparse
+import uuid
 
 import anyio
 import anyio.lowlevel
@@ -138,6 +139,25 @@ _PROFILE_MESSAGE_TARGET_TIMEOUT_MS = 1_000
 _SEND_PROFILE_MESSAGE_TARGET_TIMEOUT_MS = 10_000
 _MESSAGE_SUBMIT_READY_TIMEOUT_MS = 1_000
 _MESSAGE_CLEANUP_TIMEOUT_SECONDS = 1.0
+# A conversation renders its newest message first and inserts older history
+# about 0.4 s later (measured 2026-10-14). Text entry waits until the message
+# list has been unchanged this long, so the write check and the confirmation
+# baseline see the whole thread; past the cap the send proceeds anyway.
+_THREAD_SETTLE_QUIET_MS = 1000
+_THREAD_SETTLE_TIMEOUT_MS = 6000
+
+_THREAD_SETTLE_JS = r"""arg => {
+    const count = document.querySelectorAll(
+        '[data-view-name="message-list-item"]'
+    ).length;
+    const now = performance.now();
+    const state = window.__linkedinMcpThreadSettle;
+    if (!state || state.token !== arg.token || state.count !== count) {
+        window.__linkedinMcpThreadSettle = {token: arg.token, count, since: now};
+        return false;
+    }
+    return now - state.since >= arg.quietMs;
+}"""
 
 # Narrow exception to the generic-selector rule for #1107: enterToSend uses
 # the send-toggle class only when the verified composer has no Send button.
@@ -650,9 +670,19 @@ _MESSAGE_CONFIRMATION_READY_JS = (
                     return false;
                 }
             }
-            const acknowledged = items.filter(node => {
+            // LinkedIn renders older history above the messages already shown
+            // (measured 2026-10-14), sometimes after the baseline was taken,
+            // so only a node after every baseline message can be this send.
+            const lastBaseline = items.reduce(
+                (last, node, index) => baselineUrns.has(
+                    (node.getAttribute('data-event-urn') || '').trim()
+                ) ? index : last,
+                -1
+            );
+            const acknowledged = items.filter((node, index) => {
                 const urn = (node.getAttribute('data-event-urn') || '').trim();
-                return urn.startsWith('urn:li:msg_message:') &&
+                return index > lastBaseline &&
+                    urn.startsWith('urn:li:msg_message:') &&
                     !baselineUrns.has(urn) &&
                     exactVisibleUnit(node);
             });
@@ -1375,6 +1405,19 @@ class MessageSender:
             return False
         return True
 
+    async def _wait_for_thread_to_settle(self) -> None:
+        """Wait until the conversation's message list stops changing."""
+        try:
+            await self._page.wait_for_function(
+                _THREAD_SETTLE_JS,
+                arg={"token": uuid.uuid4().hex, "quietMs": _THREAD_SETTLE_QUIET_MS},
+                timeout=_THREAD_SETTLE_TIMEOUT_MS,
+            )
+        except PlaywrightTimeoutError:
+            logger.debug("Message list was still changing at the settle cap")
+        except Exception:
+            logger.debug("Could not wait for the message list", exc_info=True)
+
     async def _resolve_message_compose_box(self) -> Any | None:
         """Resolve the editor only when exactly one visible candidate exists."""
         locator = self._page.locator(f"{_MESSAGING_COMPOSE_SELECTOR}:visible")
@@ -1762,6 +1805,7 @@ class MessageSender:
                 recipient_selected=recipient_selected,
             )
 
+        await self._wait_for_thread_to_settle()
         if self._page.url != expected_route:
             return contracts.message_action_result(
                 self._page.url,

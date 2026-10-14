@@ -317,6 +317,33 @@ PANE_REMOUNT_SEND_JS = """
   }
 """
 
+# Measured on LinkedIn 2026-10-14: a conversation first renders only its
+# newest message and inserts the older history above it about 0.4 s later. A
+# send started inside that window sees history, including an identical earlier
+# copy of the message, arrive after the baseline was taken.
+LATE_HISTORY_REPLACEMENT_SEND_JS = """
+  document.getElementById('send').addEventListener('click', event => {
+    event.preventDefault();
+    document.body.dataset.clicked = 'true';
+    const composer = document.getElementById('composer');
+    const text = composer.innerText;
+    const thread = document.getElementById('thread');
+    const placeholder = messageItem(text, 'client-uuid');
+    thread.appendChild(placeholder);
+    composer.textContent = '';
+    setTimeout(() => {
+      thread.insertBefore(
+        messageItem(text, 'urn:li:msg_message:(self,history)', SELF_URN),
+        thread.firstChild);
+    }, 20);
+    setTimeout(() => {
+      thread.appendChild(
+        messageItem(text, 'urn:li:msg_message:(self,server-new)', SELF_URN));
+      placeholder.remove();
+    }, 50);
+  });
+"""
+
 OLDER_HISTORY_SEND_JS = """
   document.getElementById('send').addEventListener('click', event => {
     event.preventDefault();
@@ -528,6 +555,11 @@ async def send(
         patch(
             "linkedin_mcp_server.linkedin.message_sender._message_page_url_is_safe",
             return_value=True,
+        ),
+        # The test pages render their whole thread at once.
+        patch(
+            "linkedin_mcp_server.linkedin.message_sender._THREAD_SETTLE_QUIET_MS",
+            50,
         ),
     ):
         return await sender.send_message(
@@ -1233,6 +1265,45 @@ class TestSendConfirmationDom:
             "urn:li:msg_message:earlier"
         )
         assert await entries.last.get_attribute("data-event-urn") == "server-opaque-id"
+
+    async def test_identical_history_rendered_after_submit_does_not_block_confirmation(
+        self, dom_page
+    ):
+        result = await send(dom_page, compose_page(LATE_HISTORY_REPLACEMENT_SEND_JS))
+
+        assert result["status"] == "sent"
+        assert result["sent"] is True
+        assert result["retry_safe"] is False
+        urns = await dom_page.locator("#thread .msg").evaluate_all(
+            "nodes => nodes.map(n => n.dataset.eventUrn)"
+        )
+        assert urns[0] == "urn:li:msg_message:(self,history)"
+        assert urns[-1] == "urn:li:msg_message:(self,server-new)"
+
+    async def test_waits_for_thread_history_to_settle(self, dom_page):
+        await dom_page.goto(COMPOSE_URL)
+        await dom_page.set_content(
+            compose_page(
+                """
+                let added = 0;
+                const timer = setInterval(() => {
+                  const thread = document.getElementById('thread');
+                  thread.insertBefore(
+                    messageItem('older', `urn:li:msg_message:(self,h${added})`),
+                    thread.firstChild);
+                  if (++added === 4) clearInterval(timer);
+                }, 120);
+                """
+            )
+        )
+        sender = _sender(dom_page)
+        with patch(
+            "linkedin_mcp_server.linkedin.message_sender._THREAD_SETTLE_QUIET_MS",
+            300,
+        ):
+            await sender._wait_for_thread_to_settle()
+
+        assert await dom_page.locator("#thread .msg").count() == 5
 
     async def test_identical_multiline_history_is_not_a_confirmation(self, dom_page):
         # The new bubble never gets an id transition, so only the earlier
