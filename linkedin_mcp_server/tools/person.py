@@ -387,7 +387,7 @@ def register_person_tools(
             since: ISO date (YYYY-MM-DD). Reading stops once a connection made
                 before this date is visible.
             ctx: FastMCP context for progress reporting
-            max_scrolls: Load-more rounds after the first screen, default 5, max 10.
+            max_scrolls: Load-more rounds after the first screen (10 cards each), default 5, max 30.
 
         Returns:
             Dict with url, sort, connections (name, headline, slug, profile_urn,

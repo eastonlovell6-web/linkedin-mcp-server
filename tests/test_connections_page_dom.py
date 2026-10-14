@@ -12,6 +12,8 @@ from linkedin_mcp_server.linkedin.connections_page import (
     CONNECTION_CARD_SELECTOR,
     CONNECTION_CARDS_JS,
     CONNECTIONS_URL,
+    CARD_COUNT_ABOVE_JS,
+    LOAD_MORE_JS,
     ConnectionsPageReader,
     parse_connected_on,
 )
@@ -140,6 +142,9 @@ class FakePage:
         self.calls.append(("wait_for_selector", selector, kwargs))
         if self.wait_error is not None:
             raise self.wait_error
+
+    async def wait_for_function(self, script, **kwargs):
+        self.calls.append(("wait_for_function", script, kwargs))
 
     async def evaluate(self, script, *args):
         self.calls.append(("evaluate", script))
@@ -344,3 +349,56 @@ async def test_malformed_percent_encoding_nulls_only_that_card(dom_page):  # noq
         None,
         "ACoAAGood",
     ]
+
+
+@pytest.mark.browser_dom
+@pytest.mark.xdist_group("browser_runtime")
+async def test_load_more_scrolls_the_list_inside_main(dom_page):  # noqa: F811
+    # LinkedIn (2026-10-14 capture) scrolls the list inside <main overflow-y:
+    # scroll> and loads the next page when the last card comes into view; the
+    # window itself never scrolls.
+    cards = "".join(
+        card(i, f"p{i}", f"P {i}", "x", "Connected on October 13, 2026")
+        for i in range(10)
+    )
+    await dom_page.set_viewport_size({"width": 800, "height": 600})
+    await dom_page.set_content(
+        "<style>html,body{height:100%;margin:0;overflow:hidden}"
+        "main{height:100%;overflow-y:scroll}"
+        "[componentkey]{height:120px}</style>"
+        f"<main><div><button>Sort by: Recently added</button></div>{cards}</main>"
+    )
+    await dom_page.evaluate(LOAD_MORE_JS)
+    await dom_page.wait_for_timeout(100)
+    assert await dom_page.evaluate("document.querySelector('main').scrollTop") > 0
+
+
+async def test_reader_waits_for_the_next_page_after_each_scroll():
+    first = {
+        "sort": "Recently added",
+        "cards": [raw("ada", "Connected on October 13, 2026")],
+    }
+    second = {
+        "sort": "Recently added",
+        "cards": first["cards"] + [raw("bob", "Connected on October 10, 2026")],
+    }
+    reader, page, _ = reader_for([first, second])
+
+    await reader.read(date(2026, 10, 11), max_scrolls=5)
+
+    waits = [c for c in page.calls if c[0] == "wait_for_function"]
+    assert waits == [
+        ("wait_for_function", CARD_COUNT_ABOVE_JS, {"arg": 1, "timeout": 8000})
+    ]
+
+
+@pytest.mark.browser_dom
+@pytest.mark.xdist_group("browser_runtime")
+async def test_card_count_predicate(dom_page):  # noqa: F811
+    await dom_page.set_content(
+        page(
+            "Recently added", [card(0, "a", "A", "x", "Connected on October 13, 2026")]
+        )
+    )
+    assert await dom_page.evaluate(CARD_COUNT_ABOVE_JS, 0) is True
+    assert await dom_page.evaluate(CARD_COUNT_ABOVE_JS, 1) is False

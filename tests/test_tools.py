@@ -308,7 +308,7 @@ class TestGetRecentConnectionsTool:
         tool_fn = await self._tool(None, serve_extractor, mock_extractor)
         await tool_fn("2026-10-12", mock_context, max_scrolls=50)
         mock_extractor.get_recent_connections.assert_awaited_once_with(
-            date(2026, 10, 12), 10
+            date(2026, 10, 12), 30
         )
 
 

@@ -20,7 +20,7 @@ a page-owning collaborator.
 | `company` | `CompanyReader` | `browser-free` |
 | `connection` | `ActionSignals`, `ConnectionState`, `detect_connection_state()` | `browser-free` |
 | `connection_actions` | `ACTION_SIGNALS_JS`, `CLICK_INCOMING_ACCEPT_JS`, `ConnectionActions`, `OPEN_MORE_BUTTON_JS`, `ReadMainProfile` | `page-owning` |
-| `connections_page` | `CONNECTIONS_URL`, `CONNECTION_CARDS_JS`, `CONNECTION_CARD_SELECTOR`, `ConnectionsPageReader`, `DEFAULT_MAX_SCROLLS`, `EXPECTED_SORT`, `LOAD_MORE_JS`, `MAX_SCROLLS_CEILING`, `parse_connected_on()` | `page-owning` |
+| `connections_page` | `CARD_COUNT_ABOVE_JS`, `CONNECTIONS_URL`, `CONNECTION_CARDS_JS`, `CONNECTION_CARD_SELECTOR`, `ConnectionsPageReader`, `DEFAULT_MAX_SCROLLS`, `EXPECTED_SORT`, `LOAD_MORE_JS`, `MAX_SCROLLS_CEILING`, `NEXT_PAGE_TIMEOUT_MS`, `parse_connected_on()` | `page-owning` |
 | `content` | `PageContentReader` | `page-owning` |
 | `contracts` | `ExtractedSection`, `FilterValidationError`, `RATE_LIMITED_SECTION_TEXT`, `SEND_INTERRUPTED_WARNING`, `message_action_result()`, `rate_limited_section_error()`, `refuse_an_invalid_message()` | `browser-free` |
 | `conversations` | `ConversationReader`, `strip_select_conversation_prefix()` | `page-owning` |

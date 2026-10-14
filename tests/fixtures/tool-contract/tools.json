@@ -489,7 +489,7 @@
       "properties": {
         "max_scrolls": {
           "default": 5,
-          "description": "Load-more rounds after the first screen, default 5, max 10.",
+          "description": "Load-more rounds after the first screen (10 cards each), default 5, max 30.",
           "type": "integer"
         },
         "since": {

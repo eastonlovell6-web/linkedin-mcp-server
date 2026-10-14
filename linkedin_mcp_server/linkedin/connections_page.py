@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 CONNECTIONS_URL = "https://www.linkedin.com/mynetwork/invite-connect/connections/"
 EXPECTED_SORT = "Recently added"
 DEFAULT_MAX_SCROLLS = 5
-MAX_SCROLLS_CEILING = 10
+MAX_SCROLLS_CEILING = 30
+NEXT_PAGE_TIMEOUT_MS = 8000
 CONNECTION_CARD_SELECTOR = 'div[componentkey^="ConnectionCard_"]'
 
 # Cards are found by LinkedIn's componentkey (ConnectionCard_<n>-<slug>), not by
@@ -64,14 +65,25 @@ CONNECTION_CARDS_JS = r"""() => {
     return {sort: sortMatch ? sortMatch[1].trim() : null, cards};
 }"""
 
+# The list scrolls inside <main>, not the window, and fetches the next page of
+# 10 when the last card comes into view (capture 2026-10-14), so the last card
+# is scrolled into view rather than the window being scrolled.
 LOAD_MORE_JS = r"""() => {
     const main = document.querySelector('main') || document.body;
     const button = Array.from(main.querySelectorAll('button'))
         .find(b => /^(Load more|Show more results)$/i.test((b.innerText || '').trim()));
     if (button) { button.click(); return 'clicked'; }
+    const cards = main.querySelectorAll('div[componentkey^="ConnectionCard_"]');
+    if (cards.length) {
+        cards[cards.length - 1].scrollIntoView({block: 'end'});
+        return 'scrolled';
+    }
     window.scrollTo(0, document.body.scrollHeight);
     return 'scrolled';
 }"""
+
+CARD_COUNT_ABOVE_JS = r"""count =>
+    document.querySelectorAll('div[componentkey^="ConnectionCard_"]').length > count"""
 
 _CONNECTED_RE = re.compile(r"^Connected on ([A-Z][a-z]+ \d{1,2}, \d{4})$")
 
@@ -121,8 +133,17 @@ class ConnectionsPageReader:
         cards = self._merge([], snapshot.get("cards", []))
         scrolls = 0
         while not self._reached(cards, since) and scrolls < max_scrolls:
+            rendered = len(snapshot.get("cards", []))
             await page.evaluate(LOAD_MORE_JS)
             scrolls += 1
+            # The next page arrives over the network; a timeout means the list
+            # is exhausted or slow, and the snapshot below reads what is there.
+            try:
+                await page.wait_for_function(
+                    CARD_COUNT_ABOVE_JS, arg=rendered, timeout=NEXT_PAGE_TIMEOUT_MS
+                )
+            except PlaywrightTimeoutError:
+                logger.debug("no further connection cards within the page timeout")
             await self._session.delay(random.uniform(1.5, 3.0))
             snapshot = await page.evaluate(CONNECTION_CARDS_JS)
             cards = self._merge(cards, snapshot.get("cards", []))
