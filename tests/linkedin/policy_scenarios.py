@@ -1038,6 +1038,36 @@ async def _recent_connections_scenario() -> dict[str, Any]:
     )
 
 
+async def _thread_messages_scenario() -> dict[str, Any]:
+    recorder = TraceRecorder("get_thread_messages__baseline", _COMMON_ALLOWED)
+    clock = FakeClock(recorder)
+    page = _page(recorder)
+    _script_message_surface(page, states=(_VALID_COMPOSER,))
+    page.script("wait_for_selector:message_items", None)
+    page.script(
+        "evaluate:thread_messages",
+        {
+            "status": "ok",
+            "messages": [
+                {"from_me": True, "text": "Hi Ada, quick one."},
+                {"from_me": False, "text": "A"},
+            ],
+        },
+    )
+    extractor = _extractor(page)
+    async with boundaries(recorder, clock):
+        with recorder.context("get_thread_messages", "conversation"):
+            result = await extractor.get_thread_messages("ada-lovelace", limit=20)
+    page.assert_clean()
+    return recorder.trace(
+        {
+            "method": "get_thread_messages",
+            "arguments": {"linkedin_username": "ada-lovelace", "limit": 20},
+        },
+        result,
+    )
+
+
 async def _conversation_scenario(method: str) -> dict[str, Any]:
     name = f"{method}__baseline"
     recorder = TraceRecorder(name, _COMMON_ALLOWED)
@@ -1152,6 +1182,7 @@ TOOL_FACADE_METHODS = {
     "get_recent_connections",
     "get_saved_jobs",
     "get_sidebar_profiles",
+    "get_thread_messages",
     "read_company",
     "read_job",
     "read_person",
@@ -1244,6 +1275,7 @@ async def build_policy_traces() -> dict[str, dict[str, Any]]:
         "conversation-row-resolution.json": (
             await _conversation_row_resolution_scenario()
         ),
+        "thread-messages.json": await _thread_messages_scenario(),
     }
     return traces
 

@@ -27,6 +27,12 @@ from linkedin_mcp_server.linkedin.link_metadata import (
     build_references,
     dedupe_references,
 )
+from linkedin_mcp_server.linkedin.message_sender import (
+    _MESSAGE_COMPOSER_INSPECT_JS,
+    _MESSAGE_SENDER_JS,
+    MessageSender,
+    _OpenedComposer,
+)
 from linkedin_mcp_server.linkedin.navigation import PageNavigator
 from linkedin_mcp_server.linkedin.profile_page import ProfilePageReader
 from linkedin_mcp_server.linkedin.session import PageSession
@@ -65,6 +71,50 @@ _SCAN_STARTED_ON_THREAD = (
 _BYPASS_ROW_ATTRIBUTION = (
     " Use get_conversation(thread_id=...) with a known thread id to bypass"
     " row attribution."
+)
+
+
+# A conversation can mount its composer before any message renders. Reading
+# then would report an existing thread as empty, so the read first waits this
+# long for a message to attach; a thread that never had one costs the full wait.
+_THREAD_FIRST_MESSAGE_TIMEOUT_MS = 5000
+
+# Reads the open conversation as rows, oldest first. The recipient is re-proven
+# on the composer at read time and the route must be the one the open pinned.
+# A message's text is its ``p.msg-s-event-listitem__body`` (measured
+# 2026-10-16), compared and returned in the canonical form the send path uses:
+# non-empty lines, whitespace runs collapsed. A message with no body (an
+# attachment, say) has empty text but still counts.
+_THREAD_MESSAGES_JS = (
+    "(arg) => {"
+    + _MESSAGE_COMPOSER_INSPECT_JS
+    + _MESSAGE_SENDER_JS
+    + r"""
+        const itemSelector = '[data-view-name="message-list-item"]';
+        const composer = inspect(arg);
+        if (composer.status !== 'valid' || composer.messageRoute !== arg.route) {
+            return {status: 'recipient_mismatch'};
+        }
+        const scope = threadScope(composer.owner);
+        const all = Array.from(scope.querySelectorAll(itemSelector));
+        // Messages on the page that the composer's pane does not hold belong
+        // to no proven conversation, and are not an empty thread either.
+        if (all.length === 0 && document.querySelector(itemSelector)) {
+            return {status: 'thread_unscoped'};
+        }
+        const messages = [];
+        for (const item of all.filter(visible)) {
+            const sender = messageSender(all, item, arg);
+            if (sender === null) return {status: 'sender_unknown'};
+            const text = canonicalMessage(
+                Array.from(item.querySelectorAll('.msg-s-event-listitem__body'))
+                    .map(body => body.innerText || '')
+                    .join('\n')
+            );
+            messages.push({from_me: sender === 'other', text});
+        }
+        return {status: 'ok', messages};
+    }"""
 )
 
 
@@ -262,11 +312,13 @@ class ConversationReader:
         navigator: PageNavigator,
         content: PageContentReader,
         profile_page: ProfilePageReader,
+        message_sender: MessageSender | None = None,
     ):
         self._session = session
         self._navigator = navigator
         self._content = content
         self._profile_page = profile_page
+        self._message_sender = message_sender or MessageSender(session, navigator)
 
     @staticmethod
     def _single_section_result(
@@ -760,6 +812,74 @@ class ConversationReader:
             cleaned,
             references=references,
         )
+
+    async def get_thread_messages(
+        self, linkedin_username: str, limit: int = 20
+    ) -> dict[str, Any]:
+        """Read one recipient's conversation as rows, oldest first.
+
+        The thread is opened through the profile-URN compose path ``send_message``
+        uses, so the recipient is proven by the profile's own Message action and
+        no inbox row is ever clicked. Opening a thread may still mark it read.
+        ``messages`` holds the newest ``limit`` messages; ``their_count`` and
+        ``my_count`` count every message the page loaded. A thread that does
+        not exist yet reads as ``messages: []``. When the recipient cannot be
+        confirmed, or a message's sender cannot be told, the result carries an
+        ``error`` and no messages rather than a partial reading.
+        """
+        linkedin_username = normalize_person_identifier(linkedin_username)
+        opened = await self._message_sender._open_verified_composer(linkedin_username)
+        if not isinstance(opened, _OpenedComposer):
+            error = (
+                "message_unavailable"
+                if opened.get("status") == "message_unavailable"
+                else "recipient_mismatch"
+            )
+            return self._thread_error(
+                opened.get("url") or self._session.page.url, error
+            )
+
+        page = self._session.page
+        try:
+            await page.wait_for_selector(
+                '[data-view-name="message-list-item"]',
+                state="attached",
+                timeout=_THREAD_FIRST_MESSAGE_TIMEOUT_MS,
+            )
+        except PlaywrightTimeoutError:
+            logger.debug("No message rendered for %s", linkedin_username)
+        # Older history renders after the newest message (measured 2026-10-14).
+        await self._message_sender._wait_for_thread_to_settle()
+        if page.url != opened.route:
+            return self._thread_error(page.url, "recipient_mismatch")
+
+        data = await page.evaluate(
+            _THREAD_MESSAGES_JS,
+            {
+                **self._message_sender._message_target_argument(opened.target),
+                "route": opened.route,
+            },
+        )
+        if not isinstance(data, dict) or data.get("status") != "ok":
+            status = data.get("status") if isinstance(data, dict) else None
+            return self._thread_error(page.url, status or "thread_unreadable")
+
+        messages = [
+            {"from_me": message["from_me"] is True, "text": str(message["text"])}
+            for message in data["messages"]
+        ]
+        their_count = sum(1 for message in messages if not message["from_me"])
+        return {
+            "url": page.url,
+            "recipient_selected": True,
+            "messages": messages[-limit:] if limit > 0 else [],
+            "their_count": their_count,
+            "my_count": len(messages) - their_count,
+        }
+
+    @staticmethod
+    def _thread_error(url: str, error: str) -> dict[str, Any]:
+        return {"url": url, "recipient_selected": False, "error": error, "messages": []}
 
     async def search_conversations(
         self, keywords: str, limit: int = 20

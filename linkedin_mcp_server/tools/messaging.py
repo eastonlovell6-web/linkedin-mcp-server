@@ -182,6 +182,70 @@ def register_messaging_tools(
 
     @mcp.tool(
         timeout=tool_timeout,
+        title="Get Thread Messages",
+        # Not read-only, though it reads: opening the thread can mark it read,
+        # the same reason as `get_conversation`.
+        annotations={"readOnlyHint": False, "openWorldHint": True},
+        tags={"messaging"},
+    )
+    async def get_thread_messages(
+        ctx: Context,
+        linkedin_username: str,
+        limit: Annotated[int, Field(ge=1, le=50)] = 20,
+    ) -> dict[str, Any]:
+        """
+        Read the conversation with one person as structured messages.
+
+        Opens the thread through the same profile-based compose path as
+        send_message, never by clicking inbox rows, so the recipient is proven
+        by their profile's Message action. Opening the thread may mark it read.
+        Each message says whether it is from you; a sender is read from the
+        profile link that heads its message group.
+
+        Args:
+            ctx: FastMCP context for progress reporting
+            linkedin_username: LinkedIn username of the other participant; a full profile URL is accepted too
+            limit: Maximum number of newest messages to return (1-50, default 20)
+
+        Returns:
+            Dict with url, recipient_selected, messages (oldest first, each
+            {from_me, text}; text keeps line breaks, one per non-empty line),
+            their_count and my_count (over every message the page loaded,
+            not only the returned ones). A thread that does not exist yet has
+            messages []. When the recipient cannot be confirmed the result is
+            error "recipient_mismatch" with messages []; other errors
+            ("message_unavailable", "sender_unknown", "thread_unscoped") also
+            come with messages [] and mean the thread could not be read.
+        """
+        try:
+            linkedin_username = normalize_person_identifier(linkedin_username)
+            extractor = await get_ready_extractor(ctx, tool_name="get_thread_messages")
+            logger.info(
+                "Reading thread messages: username=%s, limit=%d",
+                linkedin_username,
+                limit,
+            )
+
+            await ctx.report_progress(
+                progress=0, total=100, message="Loading conversation"
+            )
+
+            result = await extractor.get_thread_messages(linkedin_username, limit=limit)
+
+            await ctx.report_progress(progress=100, total=100, message="Complete")
+
+            return result
+
+        except AuthenticationError as e:
+            try:
+                await handle_auth_error(e, ctx)
+            except Exception as relogin_exc:
+                raise_tool_error(relogin_exc, "get_thread_messages")
+        except Exception as e:
+            raise_tool_error(e, "get_thread_messages")  # NoReturn
+
+    @mcp.tool(
+        timeout=tool_timeout,
         title="Search Conversations",
         # Same reason as `get_conversation`: enumerating result rows selects them
         # in LinkedIn's UI, which can mark them read. Its own `limit` argument is

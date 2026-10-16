@@ -1,0 +1,229 @@
+{
+  "call": {
+    "arguments": {
+      "limit": 20,
+      "linkedin_username": "ada-lovelace"
+    },
+    "method": "get_thread_messages"
+  },
+  "events": [
+    {
+      "call": "get_thread_messages",
+      "callback_id": "callback-1",
+      "event": "framenavigated",
+      "kind": "listener.add",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "extra": {
+        "target_url": "https://www.linkedin.com/in/ada-lovelace/",
+        "wait_until": "domcontentloaded"
+      },
+      "kind": "boundary.trace",
+      "label": "extractor-before-goto",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "navigate",
+      "landed_url": "https://www.linkedin.com/in/ada-lovelace/",
+      "requested_url": "https://www.linkedin.com/in/ada-lovelace/",
+      "section": "conversation",
+      "timeout_ms": 30000,
+      "wait_until": "domcontentloaded"
+    },
+    {
+      "call": "get_thread_messages",
+      "description": "goto https://www.linkedin.com/in/ada-lovelace/",
+      "kind": "boundary.stabilize",
+      "result": null,
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "extra": {
+        "target_url": "https://www.linkedin.com/in/ada-lovelace/",
+        "wait_until": "domcontentloaded"
+      },
+      "kind": "boundary.trace",
+      "label": "extractor-after-goto",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "boundary.auth_quick",
+      "result": null,
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "callback_id": "callback-1",
+      "event": "framenavigated",
+      "kind": "listener.remove",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "boundary.rate_limit",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "wait_for_selector",
+      "operation": "main",
+      "section": "conversation",
+      "selector": "main",
+      "state": "visible",
+      "timeout_ms": null
+    },
+    {
+      "arg": null,
+      "call": "get_thread_messages",
+      "kind": "wait_for_function",
+      "operation": "profile_message_target_ready",
+      "program_digest": "d156e406f6bb",
+      "section": "conversation",
+      "timeout_ms": 10000
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "evaluate",
+      "operation": "profile_message_target",
+      "program_digest": "c7804bf22e53",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "callback_id": "callback-2",
+      "event": "framenavigated",
+      "kind": "listener.add",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "extra": {
+        "target_url": "https://www.linkedin.com/messaging/compose/?recipient=ACoAA-policy&profileUrn=urn%3Ali%3Afsd_profile%3AACoAA-policy",
+        "wait_until": "domcontentloaded"
+      },
+      "kind": "boundary.trace",
+      "label": "extractor-before-goto",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "navigate",
+      "landed_url": "https://www.linkedin.com/messaging/thread/2-policy-thread==/",
+      "requested_url": "https://www.linkedin.com/messaging/compose/?recipient=ACoAA-policy&profileUrn=urn%3Ali%3Afsd_profile%3AACoAA-policy",
+      "section": "conversation",
+      "timeout_ms": 30000,
+      "wait_until": "domcontentloaded"
+    },
+    {
+      "call": "get_thread_messages",
+      "description": "goto https://www.linkedin.com/messaging/compose/?recipient=ACoAA-policy&profileUrn=urn%3Ali%3Afsd_profile%3AACoAA-policy",
+      "kind": "boundary.stabilize",
+      "result": null,
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "extra": {
+        "target_url": "https://www.linkedin.com/messaging/compose/?recipient=ACoAA-policy&profileUrn=urn%3Ali%3Afsd_profile%3AACoAA-policy",
+        "wait_until": "domcontentloaded"
+      },
+      "kind": "boundary.trace",
+      "label": "extractor-after-goto",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "boundary.auth_quick",
+      "result": null,
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "callback_id": "callback-2",
+      "event": "framenavigated",
+      "kind": "listener.remove",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "boundary.rate_limit",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "wait_for_selector",
+      "operation": "main",
+      "section": "conversation",
+      "selector": "main",
+      "state": "visible",
+      "timeout_ms": null
+    },
+    {
+      "arg": {
+        "profilePath": "/in/ada-lovelace/",
+        "profileUrn": "ACoAA-policy"
+      },
+      "call": "get_thread_messages",
+      "kind": "wait_for_function",
+      "operation": "message_composer_ready",
+      "program_digest": "50043d9b9657",
+      "section": "conversation",
+      "timeout_ms": null
+    },
+    {
+      "arg": {
+        "profilePath": "/in/ada-lovelace/",
+        "profileUrn": "ACoAA-policy"
+      },
+      "call": "get_thread_messages",
+      "kind": "evaluate",
+      "operation": "message_composer_state",
+      "program_digest": "080131f167f7",
+      "section": "conversation"
+    },
+    {
+      "call": "get_thread_messages",
+      "kind": "wait_for_selector",
+      "operation": "message_items",
+      "section": "conversation",
+      "selector": "[data-view-name=\"message-list-item\"]",
+      "state": "attached",
+      "timeout_ms": 5000
+    },
+    {
+      "arg": {
+        "profilePath": "/in/ada-lovelace/",
+        "profileUrn": "ACoAA-policy",
+        "route": "https://www.linkedin.com/messaging/thread/2-policy-thread==/"
+      },
+      "call": "get_thread_messages",
+      "kind": "evaluate",
+      "operation": "thread_messages",
+      "program_digest": "86524e80d6f9",
+      "section": "conversation"
+    }
+  ],
+  "result": {
+    "messages": [
+      {
+        "from_me": true,
+        "text": "Hi Ada, quick one."
+      },
+      {
+        "from_me": false,
+        "text": "A"
+      }
+    ],
+    "my_count": 1,
+    "recipient_selected": true,
+    "their_count": 1,
+    "url": "https://www.linkedin.com/messaging/thread/2-policy-thread==/"
+  },
+  "scenario": "get_thread_messages__baseline",
+  "schema_version": 1
+}

@@ -43,7 +43,8 @@ instances, clear profiles, or replace the user's browser session.
   and `get_company_employees`.
 - Jobs: `search_jobs`, `get_saved_jobs`, and `get_job_details`.
 - Content: `get_feed` and `search_posts`.
-- Messages: `get_inbox`, `get_conversation`, and `search_conversations`.
+- Messages: `get_inbox`, `get_conversation`, `get_thread_messages`, and
+  `search_conversations`.
 - Writes: `send_message` and `connect_with_person`, subject to the explicit
   authorization rules above.
 - Cleanup: use `close_session` only when the user asks to end the managed

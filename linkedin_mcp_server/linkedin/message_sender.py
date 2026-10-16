@@ -183,6 +183,39 @@ _MESSAGE_ITEMS_JS = r"""
     const messageItemUrn = item => (item.getAttribute('data-event-urn') || '').trim();
 """
 
+# Shared by every program that tells whose a message is. LinkedIn heads a
+# message with links to its sender's profile (measured). A follow-up from the
+# same sender is assumed to be unheaded, so the sender of a node is the nearest
+# item at or before it that links a profile: 'recipient' when that item links
+# the target, 'other' when it links only someone else, and null when no item
+# at or before the node is headed. Only the link path counts, never its text.
+_MESSAGE_SENDER_JS = r"""
+    const linksProfile = (anchor, target) => {
+        let path;
+        try {
+            path = new URL(
+                anchor.getAttribute('href') || '', window.location.href
+            ).pathname;
+        } catch {
+            return false;
+        }
+        const identifier = /^\/in\/([^/]+)/.exec(path)?.[1];
+        return !!identifier && (
+            identifier === target.profileUrn ||
+            `/in/${identifier}/` === target.profilePath
+        );
+    };
+    const messageSender = (items, node, target) => {
+        const sender = items.slice(0, items.indexOf(node) + 1).reverse().find(
+            item => item.querySelector('a[href*="/in/"]')
+        );
+        if (!sender) return null;
+        return Array.from(sender.querySelectorAll('a[href*="/in/"]')).some(
+            anchor => linksProfile(anchor, target)
+        ) ? 'recipient' : 'other';
+    };
+"""
+
 _MESSAGE_COMPOSER_INSPECT_JS = (
     _MESSAGE_TEXT_JS
     + _MESSAGE_ITEMS_JS
@@ -572,6 +605,7 @@ _MESSAGE_CONFIRMATION_PREPARE_JS = (
 _MESSAGE_CONFIRMATION_READY_JS = (
     "(arg) => {"
     + _MESSAGE_COMPOSER_INSPECT_JS
+    + _MESSAGE_SENDER_JS
     + r"""
         const exactVisibleUnit = node => {
             if (!visible(node)) return false;
@@ -586,37 +620,13 @@ _MESSAGE_CONFIRMATION_READY_JS = (
             ).length === 1;
         };
         const itemSelector = '[data-view-name="message-list-item"]';
-        const linksRecipient = anchor => {
-            let path;
-            try {
-                path = new URL(
-                    anchor.getAttribute('href') || '', window.location.href
-                ).pathname;
-            } catch {
-                return false;
-            }
-            const identifier = /^\/in\/([^/]+)/.exec(path)?.[1];
-            return !!identifier && (
-                identifier === arg.profileUrn || `/in/${identifier}/` === arg.profilePath
-            );
-        };
-        // LinkedIn heads a message with links to its sender's profile
-        // (measured). A follow-up from the same sender is assumed to be
-        // unheaded, so the sender of a node is the nearest item at or before
-        // it that links a profile. A
-        // message from the recipient can carry the same text without this
+        const linksRecipient = anchor => linksProfile(anchor, arg);
+        // A message from the recipient can carry the same text without this
         // submission ever reaching LinkedIn, so refuse a node the recipient
-        // sent, or one whose sender cannot be found. Only the link path
-        // counts, never its text.
-        const sentByRecipient = (scope, node) => {
-            const all = Array.from(scope.querySelectorAll(itemSelector));
-            const sender = all.slice(0, all.indexOf(node) + 1).reverse().find(
-                item => item.querySelector('a[href*="/in/"]')
-            );
-            return !sender || Array.from(
-                sender.querySelectorAll('a[href*="/in/"]')
-            ).some(linksRecipient);
-        };
+        // sent, or one whose sender cannot be found.
+        const sentByRecipient = (scope, node) => messageSender(
+            Array.from(scope.querySelectorAll(itemSelector)), node, arg
+        ) !== 'other';
         // LinkedIn acknowledges a send by rendering a node whose event ID is
         // a server message URN. In an open thread it inserts that node and
         // removes its client-side placeholder; the first message of a new
@@ -1255,6 +1265,15 @@ class _ProfileMessageTargetResolution:
     target: _ProfileMessageTarget | None = None
 
 
+@dataclass(frozen=True)
+class _OpenedComposer:
+    """A recipient's verified composer: its target, pinned route and state."""
+
+    target: _ProfileMessageTarget
+    route: str
+    state: dict[str, Any]
+
+
 def _safe_linkedin_url(value: str, *, base: str | None = None) -> ParseResult | None:
     """Parse an HTTPS LinkedIn URL without credentials or an ambiguous origin."""
     if (
@@ -1774,36 +1793,18 @@ class MessageSender:
             recipient_selected=recipient_selected,
         )
 
-    async def send_message(
-        self,
-        linkedin_username: str,
-        message: str,
-        *,
-        confirm_send: bool,
-        profile_urn: str | None = None,
-    ) -> dict[str, Any]:
-        """Compose and send a new message with explicit confirmation gating.
+    async def _open_verified_composer(
+        self, linkedin_username: str, profile_urn: str | None = None
+    ) -> _OpenedComposer | dict[str, Any]:
+        """Open the recipient's conversation through the profile-URN compose path.
 
-        Opens LinkedIn's profile-based compose flow. That may create a separate
-        DM instead of replying in an existing recruiter/InMail or messaging
-        thread. Recipient authorization comes from the validated top-card action
-        carrying the target URN and the browser navigation it initiates. The exact
-        resulting route is pinned through every later operation; visible local
-        identities are optional corroboration, but any contradiction fails closed.
-
-        Args:
-            linkedin_username: LinkedIn username of the recipient.
-            message: The message text to send.
-            confirm_send: Must be True to actually send (False does a dry run).
-            profile_urn: Optional profile URN (e.g. ACoAAB...) to verify against
-                the recipient resolved from the loaded profile snapshot.
+        Shared by sending and by reading a thread. ``linkedin_username`` and
+        ``profile_urn`` are already normalized. Returns the verified composer,
+        or the ``message_action_result`` that says why it could not be opened.
+        Recipient authorization comes from the validated top-card action
+        carrying the target URN and the browser navigation it initiates; the
+        resulting route is returned so callers can pin it.
         """
-        refusal = contracts.refuse_an_invalid_message(linkedin_username, message)
-        if refusal is not None:
-            return refusal
-        linkedin_username = normalize_person_identifier(linkedin_username)
-        if profile_urn is not None:
-            profile_urn = normalize_profile_urn(profile_urn)
         profile_url = person_profile_url(linkedin_username, "/")
 
         await self._navigator._navigate_to_page(profile_url)
@@ -1910,6 +1911,42 @@ class MessageSender:
                 "recipient_resolution_failed",
                 "The local composer did not identify exactly the requested profile.",
             )
+        return _OpenedComposer(target=target, route=expected_route, state=state)
+
+    async def send_message(
+        self,
+        linkedin_username: str,
+        message: str,
+        *,
+        confirm_send: bool,
+        profile_urn: str | None = None,
+    ) -> dict[str, Any]:
+        """Compose and send a new message with explicit confirmation gating.
+
+        Opens LinkedIn's profile-based compose flow. That may create a separate
+        DM instead of replying in an existing recruiter/InMail or messaging
+        thread. Recipient authorization comes from the validated top-card action
+        carrying the target URN and the browser navigation it initiates. The exact
+        resulting route is pinned through every later operation; visible local
+        identities are optional corroboration, but any contradiction fails closed.
+
+        Args:
+            linkedin_username: LinkedIn username of the recipient.
+            message: The message text to send.
+            confirm_send: Must be True to actually send (False does a dry run).
+            profile_urn: Optional profile URN (e.g. ACoAAB...) to verify against
+                the recipient resolved from the loaded profile snapshot.
+        """
+        refusal = contracts.refuse_an_invalid_message(linkedin_username, message)
+        if refusal is not None:
+            return refusal
+        linkedin_username = normalize_person_identifier(linkedin_username)
+        if profile_urn is not None:
+            profile_urn = normalize_profile_urn(profile_urn)
+        opened = await self._open_verified_composer(linkedin_username, profile_urn)
+        if not isinstance(opened, _OpenedComposer):
+            return opened
+        target, expected_route, state = opened.target, opened.route, opened.state
         recipient_selected = True
         if state.get("enterToSend") is True:
             return _enter_to_send_result(self._page.url)

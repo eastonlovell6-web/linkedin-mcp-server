@@ -560,6 +560,7 @@ def semantic_selector_id(selector: str) -> str:
         "[role='menu']": "profile_more_menu",
         "main li label[aria-label]": "conversation_rows",
         'div[componentkey^="ConnectionCard_"]': "connection_cards",
+        '[data-view-name="message-list-item"]': "message_items",
     }
     if selector in selectors:
         return selectors[selector]
@@ -597,6 +598,7 @@ def semantic_program_id(program: str) -> str:
     compact = " ".join(program.split())
     checks = (
         ("performance.timeOrigin", "document_origin"),
+        ("messages.push({from_me", "thread_messages"),
         ("MAX_HEADING_CONTAINERS", "root_content"),
         ("SIDEBAR_SECTIONS", "sidebar_profiles"),
         ("ConnectionCard_", "connection_cards"),

@@ -58,6 +58,7 @@ TOOL_DELEGATES = {
     "get_recent_connections": "get_recent_connections",
     "get_saved_jobs": "get_saved_jobs",
     "get_sidebar_profiles": "get_sidebar_profiles",
+    "get_thread_messages": "get_thread_messages",
     "search_companies": "search_companies",
     "search_conversations": "search_conversations",
     "search_jobs": "search_jobs",

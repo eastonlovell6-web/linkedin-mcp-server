@@ -41,6 +41,7 @@ def _make_mock_extractor(result: dict) -> MagicMock:
     mock.get_recent_connections = AsyncMock(return_value=result)
     mock.get_inbox = AsyncMock(return_value=result)
     mock.get_conversation = AsyncMock(return_value=result)
+    mock.get_thread_messages = AsyncMock(return_value=result)
     mock.search_conversations = AsyncMock(return_value=result)
     mock.send_message = AsyncMock(return_value=result)
     mock.get_my_profile = AsyncMock(return_value=result)
@@ -1376,6 +1377,33 @@ class TestMessagingTools:
         assert result["sections"]["conversation"] == "Hello!\nHi there!"
         mock_extractor.get_conversation.assert_awaited_once_with(
             linkedin_username="testuser", thread_id=None, index=0
+        )
+
+    async def test_get_thread_messages_success(self, mock_context, serve_extractor):
+        expected = {
+            "url": "https://www.linkedin.com/messaging/thread/abc123/",
+            "recipient_selected": True,
+            "messages": [{"from_me": False, "text": "A"}],
+            "their_count": 1,
+            "my_count": 0,
+        }
+        mock_extractor = _make_mock_extractor(expected)
+
+        from linkedin_mcp_server.tools.messaging import register_messaging_tools
+
+        mcp = FastMCP("test")
+        register_messaging_tools(mcp)
+
+        serve_extractor(mock_extractor)
+        tool_fn = await get_tool_fn(mcp, "get_thread_messages")
+        result = await tool_fn(
+            mock_context,
+            linkedin_username="https://www.linkedin.com/in/testuser/",
+        )
+
+        assert result == expected
+        mock_extractor.get_thread_messages.assert_awaited_once_with(
+            "testuser", limit=20
         )
 
     async def test_get_conversation_normalizes_a_thread_url(

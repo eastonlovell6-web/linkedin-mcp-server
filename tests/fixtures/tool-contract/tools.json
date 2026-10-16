@@ -579,6 +579,46 @@
     "_meta": {
       "fastmcp": {
         "tags": [
+          "messaging"
+        ]
+      }
+    },
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": false
+    },
+    "description": "Read the conversation with one person as structured messages.\n\nOpens the thread through the same profile-based compose path as\nsend_message, never by clicking inbox rows, so the recipient is proven\nby their profile's Message action. Opening the thread may mark it read.\nEach message says whether it is from you; a sender is read from the\nprofile link that heads its message group.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 20,
+          "description": "Maximum number of newest messages to return (1-50, default 20)",
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "linkedin_username": {
+          "description": "LinkedIn username of the other participant; a full profile URL is accepted too",
+          "type": "string"
+        }
+      },
+      "required": [
+        "linkedin_username"
+      ],
+      "type": "object"
+    },
+    "name": "get_thread_messages",
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "title": "Get Thread Messages"
+  },
+  {
+    "_meta": {
+      "fastmcp": {
+        "tags": [
           "company",
           "search"
         ]

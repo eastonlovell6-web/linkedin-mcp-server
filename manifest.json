@@ -108,6 +108,10 @@
       "description": "Read a specific messaging conversation by thread ID or LinkedIn username"
     },
     {
+      "name": "get_thread_messages",
+      "description": "Read the conversation with one person as structured messages (from_me, text) with counts, opened from their profile"
+    },
+    {
       "name": "search_conversations",
       "description": "Search LinkedIn messages by keyword"
     },

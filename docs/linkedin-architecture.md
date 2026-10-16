@@ -52,7 +52,7 @@ a page-owning collaborator.
 - `connections_page` -> `navigation`, `session`
 - `content` -> `session`, `text`
 - `contracts` -> `identifiers`, `link_metadata`
-- `conversations` -> `content`, `identifiers`, `link_metadata`, `navigation`, `profile_page`, `session`, `text`
+- `conversations` -> `content`, `identifiers`, `link_metadata`, `message_sender`, `navigation`, `profile_page`, `session`, `text`
 - `extractor` -> `capture`, `company`, `connection_actions`, `connections_page`, `content`, `contracts`, `conversations`, `feed`, `job_pages`, `jobs`, `message_sender`, `navigation`, `person`, `posts`, `profile_page`, `session`, `text`
 - `feed` -> `content`, `contracts`, `feed_payload`, `navigation`, `session`, `text`
 - `feed_payload` -> `link_metadata`
@@ -85,6 +85,7 @@ a page-owning collaborator.
 - `get_recent_connections`
 - `get_saved_jobs`
 - `get_sidebar_profiles`
+- `get_thread_messages`
 - `read_company`
 - `read_job`
 - `read_person`

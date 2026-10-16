@@ -69,7 +69,7 @@ class LinkedInExtractor:
         self._jobs = JobReader(navigator, capture, job_pages)
         self._posts = PostSearch(capture)
         self._conversations = ConversationReader(
-            session, navigator, content, profile_page
+            session, navigator, content, profile_page, message_sender
         )
 
     async def get_page_text(self) -> str:
@@ -243,6 +243,12 @@ class LinkedInExtractor:
         return await self._conversations.get_conversation(
             linkedin_username, thread_id, index
         )
+
+    async def get_thread_messages(
+        self, linkedin_username: str, limit: int = 20
+    ) -> dict[str, Any]:
+        """Read one recipient's conversation as structured rows, oldest first."""
+        return await self._conversations.get_thread_messages(linkedin_username, limit)
 
     async def search_conversations(
         self, keywords: str, limit: int = 20
