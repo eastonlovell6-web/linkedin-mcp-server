@@ -187,14 +187,14 @@ async def _clicks(page) -> int:
 async def test_reads_rows_with_direction(dom_page):
     result = await _read(
         dom_page,
-        inbox_html([row("Mason White", "You: Hi Mason"), row("Sarah Lee", "A")]),
+        inbox_html([row("Ada Lovelace", "You: Hi Ada"), row("Sarah Lee", "A")]),
     )
 
     assert result["unparsed"] == 0
     assert result["threads"] == [
         {
-            "name": "Mason White",
-            "preview": "You: Hi Mason",
+            "name": "Ada Lovelace",
+            "preview": "You: Hi Ada",
             "last_from_me": True,
             "unread": False,
         },
@@ -207,7 +207,7 @@ async def test_never_clicks_a_row(dom_page):
     await _read(
         dom_page,
         inbox_html(
-            [row("Mason White", "You: Hi Mason"), row("Sarah Lee", "A")]
+            [row("Ada Lovelace", "You: Hi Ada"), row("Sarah Lee", "A")]
             + [row(f"Person {i}", "Sarah: hello") for i in range(6)],
             occluded={4, 5, 6, 7},
         ),
@@ -223,11 +223,11 @@ async def test_unrecognised_row_counts_as_unparsed(dom_page):
     no_name = row("", "Bo: hi")
     result = await _read(
         dom_page,
-        inbox_html([row("Mason White", "You: Hi Mason"), no_snippet, no_name]),
+        inbox_html([row("Ada Lovelace", "You: Hi Ada"), no_snippet, no_name]),
     )
 
     assert result["unparsed"] == 2
-    assert [thread["name"] for thread in result["threads"]] == ["Mason White"]
+    assert [thread["name"] for thread in result["threads"]] == ["Ada Lovelace"]
 
 
 async def test_theirs_unread_and_nudged_rows(dom_page):
@@ -284,7 +284,7 @@ async def test_theirs_unread_and_nudged_rows(dom_page):
 
 async def test_occluded_rows_are_scrolled_into_view_and_read(dom_page):
     rows = [row(f"Person {i}", f"Person: message {i}") for i in range(8)]
-    rows[6] = row("Mason White", "Mason: A")
+    rows[6] = row("Ada Lovelace", "Ada: A")
     result = await _read(dom_page, inbox_html(rows, occluded={3, 4, 5, 6, 7}))
 
     assert result["unparsed"] == 0
@@ -295,7 +295,7 @@ async def test_occluded_rows_are_scrolled_into_view_and_read(dom_page):
         "Person 3",
         "Person 4",
         "Person 5",
-        "Mason White",
+        "Ada Lovelace",
         "Person 7",
     ]
     assert result["threads"][6]["last_from_me"] is False
@@ -303,7 +303,7 @@ async def test_occluded_rows_are_scrolled_into_view_and_read(dom_page):
 
 async def test_row_that_never_renders_counts_as_unparsed(dom_page):
     html = inbox_html(
-        [row("Mason White", "You: Hi Mason"), row("Sarah Lee", "A")], occluded={1}
+        [row("Ada Lovelace", "You: Hi Ada"), row("Sarah Lee", "A")], occluded={1}
     ).replace("li.dataset.template", "li.dataset.never")
     with patch(
         "linkedin_mcp_server.linkedin.conversations._INBOX_ROW_RENDER_TIMEOUT_MS",
@@ -312,7 +312,7 @@ async def test_row_that_never_renders_counts_as_unparsed(dom_page):
         result = await _read(dom_page, html)
 
     assert result["unparsed"] == 1
-    assert [thread["name"] for thread in result["threads"]] == ["Mason White"]
+    assert [thread["name"] for thread in result["threads"]] == ["Ada Lovelace"]
 
 
 async def test_limit_reads_only_the_newest_rows(dom_page):
