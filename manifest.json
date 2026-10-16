@@ -104,6 +104,10 @@
       "description": "List recent conversations from the LinkedIn messaging inbox"
     },
     {
+      "name": "get_inbox_threads",
+      "description": "List the newest inbox conversations as structured rows (name, preview, last_from_me, unread) without clicking any"
+    },
+    {
       "name": "get_conversation",
       "description": "Read a specific messaging conversation by thread ID or LinkedIn username"
     },

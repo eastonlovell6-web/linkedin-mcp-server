@@ -331,6 +331,39 @@
     "_meta": {
       "fastmcp": {
         "tags": [
+          "messaging"
+        ]
+      }
+    },
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "List the newest inbox conversations as structured rows, without clicks.\n\nLoads the messaging inbox and reads its conversation list only; no\nconversation row is clicked (rows are scrolled into view so they\nrender). LinkedIn itself opens the newest conversation on that page.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 20,
+          "description": "Maximum number of conversations to read (1-50, default 20)",
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "name": "get_inbox_threads",
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "title": "Get Inbox Threads"
+  },
+  {
+    "_meta": {
+      "fastmcp": {
+        "tags": [
           "job"
         ]
       }

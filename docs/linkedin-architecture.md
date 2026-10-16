@@ -80,6 +80,7 @@ a page-owning collaborator.
 - `get_company_employees`
 - `get_conversation`
 - `get_inbox`
+- `get_inbox_threads`
 - `get_my_profile`
 - `get_page_text`
 - `get_recent_connections`

@@ -61,6 +61,7 @@ Use code <strong>FOUNDING20</strong> for 20% off your first year <a href="https:
 | `get_sidebar_profiles` | Find recommended profile links in a person's sidebar. |
 | `get_recent_connections` | List your newest 1st-degree connections, newest first (read-only). |
 | `get_inbox` | List recent messaging conversations from your LinkedIn inbox. |
+| `get_inbox_threads` | List the newest inbox conversations as `{name, preview, last_from_me, unread}` rows without clicking any (read-only). |
 | `get_conversation` | Read a conversation by username or thread ID. |
 | `get_thread_messages` | Read the conversation with one person as `{from_me, text}` rows with reply counts, opened from their profile. |
 | `search_conversations` | Search messages by keyword across your conversations. |

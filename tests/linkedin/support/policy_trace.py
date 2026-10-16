@@ -564,6 +564,10 @@ def semantic_selector_id(selector: str) -> str:
         "main li label[aria-label]": "conversation_rows",
         'div[componentkey^="ConnectionCard_"]': "connection_cards",
         '[data-view-name="message-list-item"]': "message_items",
+        (
+            "ul.msg-conversations-container__conversations-list"
+            " > li.msg-conversation-listitem"
+        ): "inbox_rows",
     }
     if selector in selectors:
         return selectors[selector]
@@ -603,6 +607,7 @@ def semantic_program_id(program: str) -> str:
         ("performance.timeOrigin", "document_origin"),
         ("messages.push({from_me", "thread_messages"),
         ("__linkedinMcpThreadSettle", "thread_settle"),
+        ("renderTimeoutMs", "inbox_threads"),
         ("MAX_HEADING_CONTAINERS", "root_content"),
         ("SIDEBAR_SECTIONS", "sidebar_profiles"),
         ("ConnectionCard_", "connection_cards"),

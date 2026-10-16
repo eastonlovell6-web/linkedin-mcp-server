@@ -233,6 +233,10 @@ class LinkedInExtractor:
         """List recent conversations from the messaging inbox."""
         return await self._conversations.get_inbox(limit)
 
+    async def get_inbox_threads(self, limit: int = 20) -> dict[str, Any]:
+        """List inbox conversations as structured rows, newest first, without clicks."""
+        return await self._conversations.get_inbox_threads(limit)
+
     async def get_conversation(
         self,
         linkedin_username: str | None = None,

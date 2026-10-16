@@ -40,6 +40,10 @@
         "coroutine": true,
         "signature": "(self, limit: 'int' = 20) -> 'dict[str, Any]'"
       },
+      "get_inbox_threads": {
+        "coroutine": true,
+        "signature": "(self, limit: 'int' = 20) -> 'dict[str, Any]'"
+      },
       "get_my_profile": {
         "coroutine": true,
         "signature": "(self, sections: 'set[str] | None' = None, callbacks: 'ProgressCallback | None' = None, max_scrolls: 'int | None' = None) -> 'dict[str, Any]'"
@@ -108,6 +112,7 @@
       "get_company_employees",
       "get_conversation",
       "get_inbox",
+      "get_inbox_threads",
       "get_my_profile",
       "get_recent_connections",
       "get_saved_jobs",
@@ -329,6 +334,25 @@
             "limit": {
               "default": 20,
               "description": "Maximum number of conversations to load (1-50, default 20)",
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "output": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "get_inbox_threads": {
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "default": 20,
+              "description": "Maximum number of conversations to read (1-50, default 20)",
               "maximum": 50,
               "minimum": 1,
               "type": "integer"

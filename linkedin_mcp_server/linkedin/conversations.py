@@ -118,6 +118,72 @@ _THREAD_MESSAGES_JS = (
 )
 
 
+# The inbox list as LinkedIn rendered it on bare `/messaging/` (measured
+# 2026-10-16, see tests/test_inbox_threads_dom.py): conversation rows are
+# `li.msg-conversation-listitem` children of the list, newest first. Rows away
+# from the viewport are empty, occluded `li`s that render once scrolled into
+# view and then stay rendered.
+_INBOX_URL = "https://www.linkedin.com/messaging/"
+_INBOX_ROW_SELECTOR = (
+    "ul.msg-conversations-container__conversations-list > li.msg-conversation-listitem"
+)
+_INBOX_LIST_TIMEOUT_MS = 10000
+# How long one occluded row, or the next page of rows, may take to render.
+_INBOX_ROW_RENDER_TIMEOUT_MS = 2000
+
+# Reads the first `limit` rows without clicking anything: an occluded row is
+# scrolled into view and waited for, and the list's last row is scrolled into
+# view when fewer than `limit` rows exist, which asks LinkedIn for more. A row
+# whose name or preview cannot be found exactly once comes back as null.
+_INBOX_THREADS_JS = r"""async ({ rowSelector, limit, renderTimeoutMs }) => {
+    const rowsNow = () => Array.from(document.querySelectorAll(rowSelector));
+    const nameOf = li => li.querySelectorAll('.msg-conversation-listitem__participant-names');
+    const rendered = li => nameOf(li).length > 0;
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const waitFor = async condition => {
+        for (let waited = 0; waited < renderTimeoutMs; waited += 100) {
+            if (condition()) return true;
+            await sleep(100);
+        }
+        return condition();
+    };
+    for (let index = 0; index < limit; index++) {
+        let rows = rowsNow();
+        if (index >= rows.length) {
+            if (rows.length === 0) break;
+            rows[rows.length - 1].scrollIntoView({ block: 'end' });
+            if (!(await waitFor(() => rowsNow().length > index))) break;
+            rows = rowsNow();
+        }
+        const li = rows[index];
+        if (!rendered(li)) {
+            li.scrollIntoView({ block: 'center' });
+            await waitFor(() => rendered(li));
+        }
+    }
+    const clean = text => (text || '').replace(/\s+/g, ' ').trim();
+    return rowsNow().slice(0, limit).map(li => {
+        const names = nameOf(li);
+        const snippets = li.querySelectorAll(
+            'p[class*="msg-conversation-card__message-snippet"]'
+        );
+        if (names.length !== 1 || snippets.length !== 1) return null;
+        const name = clean(names[0].innerText);
+        if (!name) return null;
+        const snippet = snippets[0];
+        return {
+            name,
+            preview: clean(snippet.innerText),
+            unread: !!li.querySelector('.msg-conversation-card__unread-count')
+                || snippet.classList.contains('msg-conversation-card__message-snippet--unread'),
+        };
+    });
+}"""
+
+# LinkedIn's prefix on the preview of a conversation whose last message is ours.
+_OWN_MESSAGE_PREFIX = "You:"
+
+
 @dataclass(frozen=True)
 class _StoppedRow:
     """The row whose click did not open a different thread path.
@@ -750,6 +816,68 @@ class ConversationReader:
         if section_errors:
             result["section_errors"] = section_errors
         return result
+
+    async def get_inbox_threads(self, limit: int = 20) -> dict[str, Any]:
+        """List the newest ``limit`` inbox conversations as structured rows.
+
+        Loads bare ``/messaging/`` and reads the conversation list only: no row
+        is ever clicked, though rows are scrolled into view so they render.
+        LinkedIn opens the newest thread on that page by itself, which may mark
+        it read. Each thread is ``{name, preview, last_from_me, unread}``,
+        newest first; ``last_from_me`` is true only when the preview starts
+        with LinkedIn's own-message prefix ``You:``. A row whose name or preview
+        cannot be read is counted in ``unparsed`` instead. When the list never
+        appears the result carries ``error: "inbox_unavailable"`` (and
+        ``"inbox_unreadable"`` when the read itself fails), with no threads.
+        """
+        page = self._session.page
+        await self._navigator._navigate_to_page(_INBOX_URL)
+        await self._session.check_rate_limit()
+        try:
+            await page.wait_for_selector(
+                _INBOX_ROW_SELECTOR,
+                state="attached",
+                timeout=_INBOX_LIST_TIMEOUT_MS,
+            )
+        except PlaywrightTimeoutError:
+            return {
+                "url": page.url,
+                "threads": [],
+                "unparsed": 0,
+                "error": "inbox_unavailable",
+            }
+
+        rows = await page.evaluate(
+            _INBOX_THREADS_JS,
+            {
+                "rowSelector": _INBOX_ROW_SELECTOR,
+                "limit": limit,
+                "renderTimeoutMs": _INBOX_ROW_RENDER_TIMEOUT_MS,
+            },
+        )
+        if not isinstance(rows, list):
+            return {
+                "url": page.url,
+                "threads": [],
+                "unparsed": 0,
+                "error": "inbox_unreadable",
+            }
+        threads: list[dict[str, Any]] = []
+        unparsed = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                unparsed += 1
+                continue
+            preview = str(row.get("preview") or "")
+            threads.append(
+                {
+                    "name": str(row["name"]),
+                    "preview": preview,
+                    "last_from_me": preview.startswith(_OWN_MESSAGE_PREFIX),
+                    "unread": row.get("unread") is True,
+                }
+            )
+        return {"url": page.url, "threads": threads, "unparsed": unparsed}
 
     async def get_conversation(
         self,

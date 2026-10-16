@@ -1,0 +1,112 @@
+{
+  "call": {
+    "arguments": {
+      "limit": 20
+    },
+    "method": "get_inbox_threads"
+  },
+  "events": [
+    {
+      "call": "get_inbox_threads",
+      "callback_id": "callback-1",
+      "event": "framenavigated",
+      "kind": "listener.add",
+      "section": "conversation"
+    },
+    {
+      "call": "get_inbox_threads",
+      "extra": {
+        "target_url": "https://www.linkedin.com/messaging/",
+        "wait_until": "domcontentloaded"
+      },
+      "kind": "boundary.trace",
+      "label": "extractor-before-goto",
+      "section": "conversation"
+    },
+    {
+      "call": "get_inbox_threads",
+      "kind": "navigate",
+      "landed_url": "https://www.linkedin.com/messaging/",
+      "requested_url": "https://www.linkedin.com/messaging/",
+      "section": "conversation",
+      "timeout_ms": 30000,
+      "wait_until": "domcontentloaded"
+    },
+    {
+      "call": "get_inbox_threads",
+      "description": "goto https://www.linkedin.com/messaging/",
+      "kind": "boundary.stabilize",
+      "result": null,
+      "section": "conversation"
+    },
+    {
+      "call": "get_inbox_threads",
+      "extra": {
+        "target_url": "https://www.linkedin.com/messaging/",
+        "wait_until": "domcontentloaded"
+      },
+      "kind": "boundary.trace",
+      "label": "extractor-after-goto",
+      "section": "conversation"
+    },
+    {
+      "call": "get_inbox_threads",
+      "kind": "boundary.auth_quick",
+      "result": null,
+      "section": "conversation"
+    },
+    {
+      "call": "get_inbox_threads",
+      "callback_id": "callback-1",
+      "event": "framenavigated",
+      "kind": "listener.remove",
+      "section": "conversation"
+    },
+    {
+      "call": "get_inbox_threads",
+      "kind": "boundary.rate_limit",
+      "section": "conversation"
+    },
+    {
+      "call": "get_inbox_threads",
+      "kind": "wait_for_selector",
+      "operation": "inbox_rows",
+      "section": "conversation",
+      "selector": "ul.msg-conversations-container__conversations-list > li.msg-conversation-listitem",
+      "state": "attached",
+      "timeout_ms": 10000
+    },
+    {
+      "arg": {
+        "limit": 20,
+        "renderTimeoutMs": 2000,
+        "rowSelector": "ul.msg-conversations-container__conversations-list > li.msg-conversation-listitem"
+      },
+      "call": "get_inbox_threads",
+      "kind": "evaluate",
+      "operation": "inbox_threads",
+      "program_digest": "0a4a7674006e",
+      "section": "conversation"
+    }
+  ],
+  "result": {
+    "threads": [
+      {
+        "last_from_me": true,
+        "name": "Ada Lovelace",
+        "preview": "You: Hi Ada",
+        "unread": false
+      },
+      {
+        "last_from_me": false,
+        "name": "Grace Hopper",
+        "preview": "Grace: A",
+        "unread": true
+      }
+    ],
+    "unparsed": 1,
+    "url": "https://www.linkedin.com/messaging/"
+  },
+  "scenario": "get_inbox_threads__baseline",
+  "schema_version": 1
+}

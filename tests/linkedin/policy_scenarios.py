@@ -1038,6 +1038,30 @@ async def _recent_connections_scenario() -> dict[str, Any]:
     )
 
 
+async def _inbox_threads_scenario() -> dict[str, Any]:
+    recorder = TraceRecorder("get_inbox_threads__baseline", _COMMON_ALLOWED)
+    clock = FakeClock(recorder)
+    page = _page(recorder)
+    page.script("wait_for_selector:inbox_rows", None)
+    page.script(
+        "evaluate:inbox_threads",
+        [
+            {"name": "Ada Lovelace", "preview": "You: Hi Ada", "unread": False},
+            {"name": "Grace Hopper", "preview": "Grace: A", "unread": True},
+            None,
+        ],
+    )
+    extractor = _extractor(page)
+    async with boundaries(recorder, clock):
+        with recorder.context("get_inbox_threads", "conversation"):
+            result = await extractor.get_inbox_threads(limit=20)
+    page.assert_clean()
+    return recorder.trace(
+        {"method": "get_inbox_threads", "arguments": {"limit": 20}},
+        result,
+    )
+
+
 async def _thread_messages_scenario() -> dict[str, Any]:
     recorder = TraceRecorder("get_thread_messages__baseline", _COMMON_ALLOWED)
     clock = FakeClock(recorder)
@@ -1178,6 +1202,7 @@ TOOL_FACADE_METHODS = {
     "get_company_employees",
     "get_conversation",
     "get_inbox",
+    "get_inbox_threads",
     "get_my_profile",
     "get_recent_connections",
     "get_saved_jobs",
@@ -1276,6 +1301,7 @@ async def build_policy_traces() -> dict[str, dict[str, Any]]:
             await _conversation_row_resolution_scenario()
         ),
         "thread-messages.json": await _thread_messages_scenario(),
+        "inbox-threads.json": await _inbox_threads_scenario(),
     }
     return traces
 

@@ -91,6 +91,57 @@ def register_messaging_tools(
 
     @mcp.tool(
         timeout=tool_timeout,
+        title="Get Inbox Threads",
+        annotations={"readOnlyHint": True, "openWorldHint": True},
+        tags={"messaging"},
+    )
+    async def get_inbox_threads(
+        ctx: Context,
+        limit: Annotated[int, Field(ge=1, le=50)] = 20,
+    ) -> dict[str, Any]:
+        """
+        List the newest inbox conversations as structured rows, without clicks.
+
+        Loads the messaging inbox and reads its conversation list only; no
+        conversation row is clicked (rows are scrolled into view so they
+        render). LinkedIn itself opens the newest conversation on that page.
+
+        Args:
+            ctx: FastMCP context for progress reporting
+            limit: Maximum number of conversations to read (1-50, default 20)
+
+        Returns:
+            Dict with url, threads (newest first, each {name, preview,
+            last_from_me, unread}) and unparsed (rows whose name or preview
+            could not be read; they are not in threads). last_from_me is true
+            only when the preview starts with LinkedIn's "You:" prefix. When
+            the list does not load the result has error "inbox_unavailable"
+            (or "inbox_unreadable") and threads [].
+        """
+        try:
+            extractor = await get_ready_extractor(ctx, tool_name="get_inbox_threads")
+            logger.info("Reading inbox threads (limit=%d)", limit)
+
+            await ctx.report_progress(
+                progress=0, total=100, message="Loading messaging inbox"
+            )
+
+            result = await extractor.get_inbox_threads(limit=limit)
+
+            await ctx.report_progress(progress=100, total=100, message="Complete")
+
+            return result
+
+        except AuthenticationError as e:
+            try:
+                await handle_auth_error(e, ctx)
+            except Exception as relogin_exc:
+                raise_tool_error(relogin_exc, "get_inbox_threads")
+        except Exception as e:
+            raise_tool_error(e, "get_inbox_threads")  # NoReturn
+
+    @mcp.tool(
+        timeout=tool_timeout,
         title="Get Conversation",
         # Not read-only, though it reads: resolving a username enumerates the
         # inbox by click-visiting rows, and LinkedIn marks a visited row as read.
