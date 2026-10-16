@@ -211,11 +211,16 @@ def register_messaging_tools(
             Dict with url, recipient_selected, messages (oldest first, each
             {from_me, text}; text keeps line breaks, one per non-empty line),
             their_count and my_count (over every message the page loaded,
-            not only the returned ones). A thread that does not exist yet has
-            messages []. When the recipient cannot be confirmed the result is
-            error "recipient_mismatch" with messages []; other errors
-            ("message_unavailable", "sender_unknown", "thread_unscoped") also
-            come with messages [] and mean the thread could not be read.
+            not only the returned ones), and loaded. A thread that does not
+            exist yet has messages []. loaded is false when no message
+            appeared within the first-message wait (5 s): that is a new thread
+            or one that has not rendered yet, and this tool cannot tell which.
+            When the recipient cannot be confirmed the result is error
+            "recipient_mismatch" with messages []. Other errors also come with
+            messages [] and mean the thread could not be read:
+            "message_unavailable", "thread_unsettled" (the message list was
+            still changing at the wait cap), "sender_unknown",
+            "thread_unscoped" and "thread_unreadable".
         """
         try:
             linkedin_username = normalize_person_identifier(linkedin_username)

@@ -477,13 +477,21 @@ def compose_page(
         entry.className = 'msg';
         entry.dataset.viewName = 'message-list-item';
         entry.dataset.eventUrn = eventUrn;
-        // A sender header links the sender's profile URN twice; a follow-up
-        // from the same sender has none.
-        for (const label of sender ? ['', 'Sender'] : []) {{
-          const link = document.createElement('a');
-          link.href = `https://www.linkedin.com/in/${{sender}}/`;
-          link.textContent = label;
-          entry.appendChild(link);
+        // A sender header links the sender's profile URN twice, around the
+        // avatar and in the name line (measured); a follow-up from the same
+        // sender has none.
+        if (sender) {{
+          const avatar = document.createElement('a');
+          avatar.className = 'msg-s-event-listitem__link';
+          avatar.href = `https://www.linkedin.com/in/${{sender}}/`;
+          entry.appendChild(avatar);
+          const meta = document.createElement('div');
+          meta.className = 'msg-s-message-group__meta';
+          const name = document.createElement('a');
+          name.href = `https://www.linkedin.com/in/${{sender}}/`;
+          name.textContent = 'Sender';
+          meta.appendChild(name);
+          entry.appendChild(meta);
         }}
         const unit = document.createElement('span');
         unit.className = 'message-unit';

@@ -823,8 +823,10 @@ class ConversationReader:
         no inbox row is ever clicked. Opening a thread may still mark it read.
         ``messages`` holds the newest ``limit`` messages; ``their_count`` and
         ``my_count`` count every message the page loaded. A thread that does
-        not exist yet reads as ``messages: []``. When the recipient cannot be
-        confirmed, or a message's sender cannot be told, the result carries an
+        not exist yet reads as ``messages: []``; ``loaded`` is false when no
+        message attached within the first-message wait, which a new thread and
+        a slow one share. When the recipient cannot be confirmed, the list never
+        settles, or a message's sender cannot be told, the result carries an
         ``error`` and no messages rather than a partial reading.
         """
         linkedin_username = normalize_person_identifier(linkedin_username)
@@ -840,6 +842,7 @@ class ConversationReader:
             )
 
         page = self._session.page
+        loaded = True
         try:
             await page.wait_for_selector(
                 '[data-view-name="message-list-item"]',
@@ -847,11 +850,16 @@ class ConversationReader:
                 timeout=_THREAD_FIRST_MESSAGE_TIMEOUT_MS,
             )
         except PlaywrightTimeoutError:
+            # A new thread, or one still rendering: the caller decides.
             logger.debug("No message rendered for %s", linkedin_username)
+            loaded = False
         # Older history renders after the newest message (measured 2026-10-14).
-        await self._message_sender._wait_for_thread_to_settle()
+        # A list still changing at the cap is a partial read, never a clean one.
+        settled = await self._message_sender._wait_for_thread_to_settle()
         if page.url != opened.route:
             return self._thread_error(page.url, "recipient_mismatch")
+        if not settled:
+            return self._thread_error(page.url, "thread_unsettled")
 
         data = await page.evaluate(
             _THREAD_MESSAGES_JS,
@@ -875,6 +883,7 @@ class ConversationReader:
             "messages": messages[-limit:] if limit > 0 else [],
             "their_count": their_count,
             "my_count": len(messages) - their_count,
+            "loaded": loaded,
         }
 
     @staticmethod

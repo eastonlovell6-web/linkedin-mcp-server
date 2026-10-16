@@ -440,6 +440,9 @@ class ScriptedPage:
         timeout: int | None = None,
     ) -> None:
         operation = semantic_program_id(expression)
+        if operation == "thread_settle" and isinstance(arg, dict):
+            # A fresh random token per wait; only its presence is policy.
+            arg = {**arg, "token": "<random>" if arg.get("token") else None}
         self.recorder.record(
             "wait_for_function",
             operation=operation,
@@ -599,6 +602,7 @@ def semantic_program_id(program: str) -> str:
     checks = (
         ("performance.timeOrigin", "document_origin"),
         ("messages.push({from_me", "thread_messages"),
+        ("__linkedinMcpThreadSettle", "thread_settle"),
         ("MAX_HEADING_CONTAINERS", "root_content"),
         ("SIDEBAR_SECTIONS", "sidebar_profiles"),
         ("ConnectionCard_", "connection_cards"),

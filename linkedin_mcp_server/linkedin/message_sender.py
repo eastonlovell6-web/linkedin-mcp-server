@@ -183,12 +183,18 @@ _MESSAGE_ITEMS_JS = r"""
     const messageItemUrn = item => (item.getAttribute('data-event-urn') || '').trim();
 """
 
-# Shared by every program that tells whose a message is. LinkedIn heads a
-# message with links to its sender's profile (measured). A follow-up from the
-# same sender is assumed to be unheaded, so the sender of a node is the nearest
-# item at or before it that links a profile: 'recipient' when that item links
-# the target, 'other' when it links only someone else, and null when no item
-# at or before the node is headed. Only the link path counts, never its text.
+# Shared by every program that tells whose a message is. An item names its own
+# sender in two places (measured 2026-10-16): its event URN,
+# urn:li:msg_message:(urn:li:fsd_profile:<sender URN>,<id>), and, when it heads
+# a message group, the header links to the sender's profile
+# (a.msg-s-event-listitem__link and the name link in
+# .msg-s-message-group__meta). The URN wins; header links are the fallback.
+# Links anywhere else in an item, such as a profile linkified in the message
+# body, never count. A follow-up from the same sender is assumed to name
+# neither, so the sender of a node is that of the nearest item at or before it
+# that names one: 'recipient' when it is the target, 'other' when it is
+# someone else, and null when no item at or before the node names a sender.
+# Only the link path counts, never its text.
 _MESSAGE_SENDER_JS = r"""
     const linksProfile = (anchor, target) => {
         let path;
@@ -205,14 +211,25 @@ _MESSAGE_SENDER_JS = r"""
             `/in/${identifier}/` === target.profilePath
         );
     };
+    const itemSender = (item, target) => {
+        const urn = /^urn:li:msg_message:\(urn:li:fsd_profile:([A-Za-z0-9_-]+),/.exec(
+            (item.getAttribute('data-event-urn') || '').trim()
+        )?.[1];
+        if (urn) return urn === target.profileUrn ? 'recipient' : 'other';
+        const header = Array.from(item.querySelectorAll(
+            'a.msg-s-event-listitem__link[href], .msg-s-message-group__meta a[href]'
+        ));
+        if (header.length === 0) return null;
+        return header.some(anchor => linksProfile(anchor, target))
+            ? 'recipient'
+            : 'other';
+    };
     const messageSender = (items, node, target) => {
-        const sender = items.slice(0, items.indexOf(node) + 1).reverse().find(
-            item => item.querySelector('a[href*="/in/"]')
-        );
-        if (!sender) return null;
-        return Array.from(sender.querySelectorAll('a[href*="/in/"]')).some(
-            anchor => linksProfile(anchor, target)
-        ) ? 'recipient' : 'other';
+        for (const item of items.slice(0, items.indexOf(node) + 1).reverse()) {
+            const sender = itemSender(item, target);
+            if (sender !== null) return sender;
+        }
+        return null;
     };
 """
 
@@ -1494,8 +1511,13 @@ class MessageSender:
             return False
         return True
 
-    async def _wait_for_thread_to_settle(self) -> None:
-        """Wait until the conversation's message list stops changing."""
+    async def _wait_for_thread_to_settle(self) -> bool:
+        """Wait until the conversation's message list stops changing.
+
+        True once the list has been unchanged for the quiet period; False at
+        the cap or when the wait itself failed. Sending proceeds either way;
+        reading a thread treats False as unreadable.
+        """
         try:
             await self._page.wait_for_function(
                 _THREAD_SETTLE_JS,
@@ -1504,8 +1526,11 @@ class MessageSender:
             )
         except PlaywrightTimeoutError:
             logger.debug("Message list was still changing at the settle cap")
+            return False
         except Exception:
             logger.debug("Could not wait for the message list", exc_info=True)
+            return False
+        return True
 
     async def _resolve_message_compose_box(self) -> Any | None:
         """Resolve the editor only when exactly one visible candidate exists."""

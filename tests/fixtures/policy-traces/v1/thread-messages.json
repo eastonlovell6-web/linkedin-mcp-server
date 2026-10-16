@@ -197,6 +197,18 @@
     },
     {
       "arg": {
+        "quietMs": 1000,
+        "token": "<random>"
+      },
+      "call": "get_thread_messages",
+      "kind": "wait_for_function",
+      "operation": "thread_settle",
+      "program_digest": "04349f3723a3",
+      "section": "conversation",
+      "timeout_ms": 6000
+    },
+    {
+      "arg": {
         "profilePath": "/in/ada-lovelace/",
         "profileUrn": "ACoAA-policy",
         "route": "https://www.linkedin.com/messaging/thread/2-policy-thread==/"
@@ -204,11 +216,12 @@
       "call": "get_thread_messages",
       "kind": "evaluate",
       "operation": "thread_messages",
-      "program_digest": "86524e80d6f9",
+      "program_digest": "b7d614ac2ffc",
       "section": "conversation"
     }
   ],
   "result": {
+    "loaded": true,
     "messages": [
       {
         "from_me": true,

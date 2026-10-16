@@ -188,6 +188,18 @@
     },
     {
       "arg": {
+        "quietMs": 1000,
+        "token": "<random>"
+      },
+      "call": "send_message",
+      "kind": "wait_for_function",
+      "operation": "thread_settle",
+      "program_digest": "04349f3723a3",
+      "section": "message",
+      "timeout_ms": 6000
+    },
+    {
+      "arg": {
         "profilePath": "/in/ada-lovelace/",
         "profileUrn": "ACoAA-policy"
       },

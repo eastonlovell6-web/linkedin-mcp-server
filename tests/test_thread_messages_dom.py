@@ -53,8 +53,20 @@ TARGET = _ProfileMessageTarget(
 )
 
 
-def item(body_html: str, *, sender: str | None, event_id: str) -> str:
-    """One message item; ``sender=None`` renders an unheaded follow-up."""
+def item(
+    body_html: str,
+    *,
+    sender: str | None,
+    event_id: str,
+    urn_sender: str | None = None,
+    named_by_urn: bool = True,
+) -> str:
+    """One message item; ``sender=None`` renders an unheaded follow-up.
+
+    The event URN names ``urn_sender`` (default: the header's sender, or us),
+    as LinkedIn's server URNs do; ``named_by_urn=False`` gives it a client URN
+    that names nobody, leaving the header links as the only evidence.
+    """
     head = ""
     if sender is not None:
         profile = f"https://www.linkedin.com/in/{sender}"
@@ -65,7 +77,12 @@ def item(body_html: str, *, sender: str | None, event_id: str) -> str:
             f'<span class="msg-s-message-group__name">Name</span></a></span>'
             f'<time class="msg-s-message-group__timestamp">3:21 PM</time></div>'
         )
-    urn = f"urn:li:msg_message:(urn:li:fsd_profile:{sender or SELF_URN},{event_id})"
+    urn = (
+        "urn:li:msg_message:(urn:li:fsd_profile:"
+        f"{urn_sender or sender or SELF_URN},{event_id})"
+        if named_by_urn
+        else f"client-{event_id}"
+    )
     return (
         f'<div class="msg-s-event-listitem" data-view-name="message-list-item" '
         f'data-event-urn="{urn}">{head}'
@@ -105,7 +122,9 @@ def _reader(page) -> ConversationReader:
     )
 
 
-async def _read(page, html: str, *, limit: int = 20) -> dict:
+async def _read(
+    page, html: str, *, limit: int = 20, settle_cap_ms: int | None = None
+) -> dict:
     await page.goto(COMPOSE_URL)
     await page.set_content(html)
     page.set_default_timeout(600)
@@ -127,6 +146,10 @@ async def _read(page, html: str, *, limit: int = 20) -> dict:
             "linkedin_mcp_server.linkedin.conversations._THREAD_FIRST_MESSAGE_TIMEOUT_MS",
             300,
         ),
+        patch(
+            "linkedin_mcp_server.linkedin.message_sender._THREAD_SETTLE_TIMEOUT_MS",
+            settle_cap_ms or 6000,
+        ),
     ):
         return await reader.get_thread_messages("testuser", limit=limit)
 
@@ -144,6 +167,7 @@ async def test_reads_messages_with_direction(dom_page):
     )
 
     assert result["recipient_selected"] is True
+    assert result["loaded"] is True
     assert result["their_count"] == 1
     assert result["my_count"] == 2
     assert result["messages"] == [
@@ -167,6 +191,7 @@ async def test_empty_thread_returns_no_messages(dom_page):
     result = await _read(dom_page, thread_html([]))
 
     assert "error" not in result
+    assert result["loaded"] is False
     assert result["messages"] == []
     assert result["their_count"] == 0
     assert result["my_count"] == 0
@@ -236,11 +261,84 @@ async def test_unknown_sender_fails_closed(dom_page):
         dom_page,
         thread_html(
             [
-                item("orphan", sender=None, event_id="1"),
+                item("orphan", sender=None, event_id="1", named_by_urn=False),
                 item("A", sender=RECIPIENT_URN, event_id="2"),
             ]
         ),
     )
 
     assert result["error"] == "sender_unknown"
+    assert result["messages"] == []
+
+
+@pytest.mark.parametrize("named_by_urn", [True, False], ids=["event-urn", "header"])
+async def test_profile_link_in_a_reply_body_does_not_make_it_ours(
+    dom_page, named_by_urn
+):
+    # The recipient's unheaded follow-up linkifies another member. Only the
+    # event URN or the header links name a sender, never a link in the body.
+    body = '<a href="https://www.linkedin.com/in/someone-else">Someone</a> can help'
+    result = await _read(
+        dom_page,
+        thread_html(
+            [
+                item("Hi, quick one.", sender=SELF_URN, event_id="1"),
+                item(
+                    "A",
+                    sender=RECIPIENT_URN,
+                    event_id="2",
+                    named_by_urn=named_by_urn,
+                ),
+                item(
+                    body,
+                    sender=None,
+                    event_id="3",
+                    urn_sender=RECIPIENT_URN,
+                    named_by_urn=named_by_urn,
+                ),
+            ]
+        ),
+    )
+
+    assert result["their_count"] == 2
+    assert result["my_count"] == 1
+    assert result["messages"][-1] == {"from_me": False, "text": "Someone can help"}
+
+
+async def test_event_urn_outranks_the_preceding_header(dom_page):
+    # An unheaded item whose server URN names the recipient is theirs even
+    # right after one of ours.
+    result = await _read(
+        dom_page,
+        thread_html(
+            [
+                item("Hi, quick one.", sender=SELF_URN, event_id="1"),
+                item("A", sender=None, event_id="2", urn_sender=RECIPIENT_URN),
+            ]
+        ),
+    )
+
+    assert (result["their_count"], result["my_count"]) == (1, 1)
+
+
+async def test_thread_still_changing_at_the_cap_is_an_error(dom_page):
+    # Messages keep arriving faster than the quiet period, so the list never
+    # settles; whatever rendered so far must not read as the whole thread.
+    script = f"""
+      let next = 10;
+      setInterval(() => {{
+        document.getElementById('thread').insertAdjacentHTML(
+          'afterbegin',
+          '<li><div data-view-name="message-list-item" '
+            + 'data-event-urn="urn:li:msg_message:(urn:li:fsd_profile:{RECIPIENT_URN},'
+            + (next++) + ')"></div></li>');
+      }}, 200);
+    """
+    result = await _read(
+        dom_page,
+        thread_html([item("Following up.", sender=SELF_URN, event_id="1")], script),
+        settle_cap_ms=1500,
+    )
+
+    assert result["error"] == "thread_unsettled"
     assert result["messages"] == []
