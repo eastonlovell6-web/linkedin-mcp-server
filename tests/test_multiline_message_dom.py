@@ -1,10 +1,15 @@
 # ruff: noqa: F811  (the imported dom_page fixture is "redefined" as a test argument)
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from linkedin_mcp_server.linkedin.message_sender import (
     _MESSAGE_COMPOSER_INSPECT_JS,
     _MESSAGE_COMPOSER_PINNED_JS,
+    MessageSender,
+    _ProfileMessageTargetResolution,
 )
+from linkedin_mcp_server.linkedin.navigation import PageNavigator
 from test_message_recipient_dom import (  # noqa: F401
     _message_target,
     _sender,
@@ -340,3 +345,134 @@ async def test_single_line_does_not_need_insert_paragraph(dom_page):
     assert single == "written"
     assert multi == "unsupported"
     assert text.strip() == ""
+
+
+async def _send(page, message: str = PITCH) -> dict:
+    """Run the whole send_message flow against the page as it stands."""
+    # The test page has no <main>, so the flow's waits for it must time out
+    # quickly rather than at Playwright's 30 s default.
+    page.set_default_timeout(600)
+    sender = _sender(page)
+    with (
+        patch.object(PageNavigator, "_navigate_to_page", new_callable=AsyncMock),
+        patch.object(
+            sender,
+            "_read_profile_message_target",
+            new_callable=AsyncMock,
+            return_value=_ProfileMessageTargetResolution("resolved", _message_target()),
+        ),
+        patch(
+            "linkedin_mcp_server.linkedin.message_sender._message_page_url_is_safe",
+            return_value=True,
+        ),
+        patch(
+            "linkedin_mcp_server.linkedin.message_sender._THREAD_SETTLE_QUIET_MS",
+            50,
+        ),
+    ):
+        return await sender.send_message("testuser", message, confirm_send=True)
+
+
+# LinkedIn takes the first paragraph break as Send, but only after the write
+# returned: the first line leaves, its bubble lands, and the composer empties.
+SEND_FIRST_LINE_JS = """
+  const thread = document.getElementById('thread');
+  const sendFirstLine = () => {
+    const item = document.createElement('div');
+    item.setAttribute('data-view-name', 'message-list-item');
+    item.textContent = editor.innerText.split('\\n')[0];
+    thread.appendChild(item);
+    editor.textContent = '';
+  };
+  // Test code evaluates in an isolated world, so it triggers this by event.
+  document.addEventListener('send-first-line', sendFirstLine);
+"""
+
+
+async def test_async_paragraph_send_is_not_retry_safe(dom_page):
+    await _set_composer_content(
+        dom_page,
+        thread_composer_html(
+            SEND_FIRST_LINE_JS
+            + """
+            // The Send button enables some time after typing starts.
+            const button = document.querySelector('form button');
+            button.disabled = true;
+            editor.addEventListener('input', e => {
+              if (e.inputType === 'insertParagraph' &&
+                  !document.documentElement.dataset.sent) {
+                document.documentElement.dataset.sent = 'yes';
+                setTimeout(sendFirstLine, 50);
+                setTimeout(() => { button.disabled = false; }, 300);
+              }
+            });"""
+        ),
+    )
+
+    result = await _send(dom_page)
+    text, clicked = await _text_and_clicked(dom_page)
+
+    assert result["status"] == "send_unconfirmed"
+    assert result["sent"] is False
+    assert result["retry_safe"] is False
+    assert text.strip() == ""
+    assert await _cleared(dom_page) is None
+    assert clicked is None
+
+
+@pytest.mark.parametrize(
+    "step", ["_prepare_message_confirmation", "_submit_verified_message"]
+)
+async def test_paragraph_send_seen_before_a_later_step_is_not_retry_safe(
+    dom_page, step
+):
+    await _set_composer_content(dom_page, thread_composer_html(SEND_FIRST_LINE_JS))
+    original = getattr(MessageSender, step)
+
+    async def send_first_line_then(self, *args, **kwargs):
+        await dom_page.evaluate(
+            "() => document.dispatchEvent(new Event('send-first-line'))"
+        )
+        return await original(self, *args, **kwargs)
+
+    with patch.object(MessageSender, step, send_first_line_then):
+        result = await _send(dom_page)
+    text, clicked = await _text_and_clicked(dom_page)
+
+    assert result["status"] == "send_unconfirmed"
+    assert result["retry_safe"] is False
+    assert text.strip() == ""
+    assert await _cleared(dom_page) is None
+    assert clicked is None
+
+
+async def test_occupied_after_diverged_is_not_retry_safe(dom_page):
+    # The first call's paragraph break sends what was typed so far and leaves
+    # it in the composer; a retry then finds that remnant standing there.
+    await _set_composer_content(
+        dom_page,
+        thread_composer_html(
+            """editor.addEventListener('input', e => {
+                 if (e.inputType === 'insertParagraph' &&
+                     !document.documentElement.dataset.sent) {
+                   document.documentElement.dataset.sent = 'yes';
+                   const item = document.createElement('div');
+                   item.setAttribute('data-view-name', 'message-list-item');
+                   item.textContent = editor.innerText;
+                   document.getElementById('thread').appendChild(item);
+                 }
+               });"""
+        ),
+    )
+
+    first = await _send(dom_page)
+    retry = await _send(dom_page)
+    text, clicked = await _text_and_clicked(dom_page)
+
+    assert first["status"] == "send_unconfirmed"
+    assert first["retry_safe"] is False
+    assert retry["status"] == "composer_occupied"
+    assert retry["sent"] is False
+    assert retry["retry_safe"] is False
+    assert text.strip() != ""
+    assert clicked is None

@@ -796,6 +796,25 @@ _MESSAGE_COMPOSER_STATE_JS = (
     }"""
 )
 
+# A diverged write leaves the composer as it stood: the lines typed so far,
+# some of which may already have been sent. A later call then finds the
+# composer occupied by nothing but lines of the very message it was asked to
+# send, and must not call that retry-safe.
+_MESSAGE_COMPOSER_REMNANT_JS = (
+    "(arg) => {"
+    + _MESSAGE_COMPOSER_INSPECT_JS
+    + r"""
+        const state = inspect(arg);
+        if (state.status !== 'valid') return false;
+        const remnantLines = canonicalMessage(
+            state.editor.innerText || state.editor.textContent || ''
+        ).split('\n').filter(Boolean);
+        const messageLines = new Set(canonicalMessage(arg.message).split('\n'));
+        return remnantLines.length > 0 &&
+            remnantLines.every(line => messageLines.has(line));
+    }"""
+)
+
 _MESSAGE_COMPOSER_READY_JS = (
     "(target) => {"
     + _MESSAGE_COMPOSER_INSPECT_JS
@@ -976,6 +995,22 @@ _MESSAGE_COMPOSER_PINNED_JS = (
         }
         return pinned;
     };
+    // A write that put in a paragraph break leaves its baseline on the pin.
+    // LinkedIn may take that break as Send only after the write returned, so
+    // from then on a composer that no longer holds exactly the written text,
+    // or a thread that gained a message, may mean part of it already left.
+    const writeDiverged = (pinned, message) => {
+        const baseline = pinned?.writeBaseline;
+        if (!baseline || baseline.message !== message || !baseline.paragraphInserted) {
+            return false;
+        }
+        const {editor} = pinned;
+        return messageItems().some(
+            item => !baseline.items.has(item) && !baseline.urns.has(messageItemUrn(item))
+        ) ||
+            !editor?.isConnected ||
+            !sameMessage(editor.innerText || editor.textContent || '', message);
+    };
 """
 )
 
@@ -1032,6 +1067,13 @@ _MESSAGE_COMPOSER_WRITE_JS = (
         const baselineUrns = new Set(
             Array.from(baselineItems).map(messageItemUrn).filter(Boolean)
         );
+        const baseline = {
+            message: arg.message,
+            items: baselineItems,
+            urns: baselineUrns,
+            paragraphInserted: false,
+        };
+        pinned.writeBaseline = baseline;
         const threadGrew = () => messageItems().some(
             item => !baselineItems.has(item) && !baselineUrns.has(messageItemUrn(item))
         );
@@ -1061,6 +1103,8 @@ _MESSAGE_COMPOSER_WRITE_JS = (
         let inserted = true;
         let progress = 'ok';
         const run = (command, value, before, after) => {
+            // Even a command that reports failure may have applied.
+            if (command === 'insertParagraph') baseline.paragraphInserted = true;
             inserted = document.execCommand(command, false, value) === true;
             // A command that reports failure may or may not have applied.
             progress = check(inserted ? [after] : [before, after]);
@@ -1100,6 +1144,9 @@ _MESSAGE_COMPOSER_SUBMIT_READY_JS = (
     "(owner, arg) => {"
     + _MESSAGE_COMPOSER_PINNED_JS
     + r"""
+        if (writeDiverged(owner?.__linkedinMcpComposer, arg.message)) {
+            return 'diverged';
+        }
         const pinned = validatePinned(arg, false);
         if (
             !pinned ||
@@ -1159,6 +1206,9 @@ _MESSAGE_COMPOSER_SUBMIT_JS = (
     "(owner, arg) => {"
     + _MESSAGE_COMPOSER_PINNED_JS
     + r"""
+        if (writeDiverged(owner?.__linkedinMcpComposer, arg.message)) {
+            return 'diverged';
+        }
         const pinned = validatePinned(arg);
         if (
             !pinned ||
@@ -1274,6 +1324,20 @@ def _profile_urn_from_compose_url(value: str, *, base: str | None = None) -> str
     if len(identifiers) != 1:
         return None
     return identifiers.pop()
+
+
+def _paragraph_send_result(url: str, *, recipient_selected: bool) -> dict[str, Any]:
+    """A paragraph break may have been taken as Send after the write returned."""
+    return contracts.message_action_result(
+        url,
+        "send_unconfirmed",
+        "The message editor or conversation changed after the text was written "
+        "with a paragraph break, so part of the message may already have been "
+        "sent. Check the conversation before retrying; retrying may deliver "
+        "the message twice.",
+        recipient_selected=recipient_selected,
+        retry_safe=False,
+    )
 
 
 def _enter_to_send_result(url: str) -> dict[str, Any]:
@@ -1480,8 +1544,13 @@ class MessageSender:
         *,
         target: _ProfileMessageTarget,
         owner: Any,
-    ) -> bool:
-        """Wait briefly for the exact pinned submit button to become active."""
+    ) -> Literal["ready", "diverged", "unavailable"]:
+        """Wait briefly for the exact pinned submit button to become active.
+
+        ``diverged`` means a paragraph break went in and the composer or the
+        thread has since moved away from the written text, which is what
+        LinkedIn taking the break as Send after the write returned looks like.
+        """
         deadline = time.monotonic() + _MESSAGE_SUBMIT_READY_TIMEOUT_MS / 1_000
         argument = {**self._message_target_argument(target), "message": message}
         while True:
@@ -1489,19 +1558,51 @@ class MessageSender:
                 state = await owner.evaluate(
                     _MESSAGE_COMPOSER_SUBMIT_READY_JS, argument
                 )
-                if state == "ready":
-                    return True
+                if state in {"ready", "diverged"}:
+                    return state
                 if state != "disabled":
-                    return False
+                    return "unavailable"
             except Exception:
                 logger.debug(
                     "Could not wait for the pinned submit button", exc_info=True
                 )
-                return False
+                return "unavailable"
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return False
+                return "unavailable"
             await asyncio.sleep(min(0.05, remaining))
+
+    async def _write_diverged(
+        self,
+        message: str,
+        *,
+        target: _ProfileMessageTarget,
+        owner: Any,
+    ) -> bool:
+        """Whether the written text may have left since the write returned."""
+        try:
+            state = await owner.evaluate(
+                _MESSAGE_COMPOSER_SUBMIT_READY_JS,
+                {**self._message_target_argument(target), "message": message},
+            )
+        except Exception:
+            logger.debug("Could not recheck the written message", exc_info=True)
+            return False
+        return state == "diverged"
+
+    async def _composer_holds_remnant(
+        self, message: str, target: _ProfileMessageTarget
+    ) -> bool:
+        """Whether the occupied composer holds only lines of this message."""
+        try:
+            remnant = await self._page.evaluate(
+                _MESSAGE_COMPOSER_REMNANT_JS,
+                {**self._message_target_argument(target), "message": message},
+            )
+        except Exception:
+            logger.debug("Could not read the occupied composer", exc_info=True)
+            return False
+        return remnant is True
 
     async def _submit_verified_message(
         self,
@@ -1515,7 +1616,7 @@ class MessageSender:
             _MESSAGE_COMPOSER_SUBMIT_JS,
             {**self._message_target_argument(target), "message": message},
         )
-        return "clicked" if result == "clicked" else "invalid"
+        return result if result in {"clicked", "diverged"} else "invalid"
 
     @staticmethod
     async def _cleanup_owned_message(message: str, owner: Any) -> None:
@@ -1656,6 +1757,34 @@ class MessageSender:
         if scope.cancel_called:
             logger.warning("Timed out disconnecting message observer")
         await anyio.lowlevel.checkpoint()
+
+    async def _composer_occupied_result(
+        self,
+        message: str,
+        target: _ProfileMessageTarget,
+        *,
+        recipient_selected: bool,
+    ) -> dict[str, Any]:
+        """Refuse an occupied composer; a remnant of this message is unsafe."""
+        if await self._composer_holds_remnant(message, target):
+            return contracts.message_action_result(
+                self._page.url,
+                "composer_occupied",
+                "The composer already holds part of this same message, which is "
+                "what an earlier send that diverged leaves behind; part of it may "
+                "already have been sent. Check the conversation before retrying; "
+                "retrying may deliver the message twice. The draft was left "
+                "untouched.",
+                recipient_selected=recipient_selected,
+                retry_safe=False,
+            )
+        return contracts.message_action_result(
+            self._page.url,
+            "composer_occupied",
+            "The composer already holds a draft that would be sent along "
+            "with the message. The draft was left untouched.",
+            recipient_selected=recipient_selected,
+        )
 
     async def send_message(
         self,
@@ -1824,12 +1953,8 @@ class MessageSender:
         if state.get("status") == "valid" and state.get("empty") is not True:
             # Text already in the editor belongs to whoever typed it. Clearing
             # it would trade a recipient leak for destroying their draft.
-            return contracts.message_action_result(
-                self._page.url,
-                "composer_occupied",
-                "The composer already holds a draft that would be sent along "
-                "with the message. The draft was left untouched.",
-                recipient_selected=recipient_selected,
+            return await self._composer_occupied_result(
+                message, target, recipient_selected=recipient_selected
             )
         if state.get("status") != "valid":
             return contracts.message_action_result(
@@ -1891,12 +2016,8 @@ class MessageSender:
                         recipient_selected=recipient_selected,
                     )
                 if write_result == "occupied":
-                    return contracts.message_action_result(
-                        self._page.url,
-                        "composer_occupied",
-                        "The composer already holds a draft that would be sent along "
-                        "with the message. The draft was left untouched.",
-                        recipient_selected=recipient_selected,
+                    return await self._composer_occupied_result(
+                        message, target, recipient_selected=recipient_selected
                     )
                 if write_result != "written":
                     return contracts.message_action_result(
@@ -1906,11 +2027,17 @@ class MessageSender:
                         recipient_selected=recipient_selected,
                     )
 
-                if not await self._wait_for_verified_submit(
+                submit_ready = await self._wait_for_verified_submit(
                     message,
                     target=target,
                     owner=owner,
-                ):
+                )
+                if submit_ready == "diverged":
+                    may_have_submitted = True
+                    return _paragraph_send_result(
+                        self._page.url, recipient_selected=recipient_selected
+                    )
+                if submit_ready != "ready":
                     return contracts.message_action_result(
                         self._page.url,
                         "send_unavailable",
@@ -1925,6 +2052,11 @@ class MessageSender:
                     owner=owner,
                 )
                 if confirmation is None:
+                    if await self._write_diverged(message, target=target, owner=owner):
+                        may_have_submitted = True
+                        return _paragraph_send_result(
+                            self._page.url, recipient_selected=recipient_selected
+                        )
                     return contracts.message_action_result(
                         self._page.url,
                         "recipient_resolution_failed",
@@ -1956,6 +2088,10 @@ class MessageSender:
                             retry_safe=False,
                         )
 
+                    if submission == "diverged":
+                        return _paragraph_send_result(
+                            self._page.url, recipient_selected=recipient_selected
+                        )
                     if submission != "clicked":
                         may_have_submitted = False
                         return contracts.message_action_result(

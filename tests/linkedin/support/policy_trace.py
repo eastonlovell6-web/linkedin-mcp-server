@@ -609,6 +609,7 @@ def semantic_program_id(program: str) -> str:
         ("const validComposeHref", "profile_message_target"),
         ("return inspect(target).status === 'valid'", "message_composer_ready"),
         ("submitUsable", "message_composer_state"),
+        ("const remnantLines", "message_composer_remnant"),
         ("__linkedinMcpComposer =", "message_composer_owner"),
         ("document.execCommand(command", "message_composer_write"),
         ("return pinned.button.disabled", "message_submit_ready"),

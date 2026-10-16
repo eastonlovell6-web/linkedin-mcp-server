@@ -706,6 +706,8 @@ async def _occupied_message_scenario(*, restored_during_write: bool) -> dict[str
     if restored_during_write:
         _script_message_owner(page, write="occupied")
         _script_owned_text_cleanup(page, removed=False)
+    # The standing draft is not made of lines of the message being sent.
+    page.script("evaluate:message_composer_remnant", False)
     extractor = _extractor(page)
     async with boundaries(recorder, clock):
         with recorder.context("send_message", "message"):

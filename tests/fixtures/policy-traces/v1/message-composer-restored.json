@@ -228,7 +228,19 @@
       "handle": "handle-1",
       "kind": "handle.evaluate",
       "operation": "message_composer_write",
-      "program_digest": "0604bc6a1980",
+      "program_digest": "01dd9a75e4b5",
+      "section": "message"
+    },
+    {
+      "arg": {
+        "message": "New text",
+        "profilePath": "/in/ada-lovelace/",
+        "profileUrn": "ACoAA-policy"
+      },
+      "call": "send_message",
+      "kind": "evaluate",
+      "operation": "message_composer_remnant",
+      "program_digest": "6289629aecf7",
       "section": "message"
     },
     {
