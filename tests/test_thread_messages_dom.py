@@ -6,8 +6,10 @@ compose route on 2026-10-16 (read-only ``thread-dom`` live check on the test
 recipient's thread, 11 message items):
 
 * every message is a ``[data-view-name="message-list-item"]`` carrying a
-  ``data-event-urn`` of the form ``urn:li:msg_message:(<sender fsd_profile>,
-  <id>)``;
+  ``data-event-urn`` of the form ``urn:li:msg_message:(urn:li:fsd_profile:
+  <URN>,<id>)``. That URN is the signed-in member's mailbox on every item,
+  the recipient's messages included, so it says nothing about the sender
+  (the first live read keyed on it and called all 11 messages ours);
 * a headed item links its sender twice, by profile URN:
   ``a.msg-s-event-listitem__link[href="https://www.linkedin.com/in/<URN>"]``
   around the avatar, and a name link inside ``.msg-s-message-group__meta``.
@@ -58,14 +60,12 @@ def item(
     *,
     sender: str | None,
     event_id: str,
-    urn_sender: str | None = None,
-    named_by_urn: bool = True,
+    server_urn: bool = True,
 ) -> str:
     """One message item; ``sender=None`` renders an unheaded follow-up.
 
-    The event URN names ``urn_sender`` (default: the header's sender, or us),
-    as LinkedIn's server URNs do; ``named_by_urn=False`` gives it a client URN
-    that names nobody, leaving the header links as the only evidence.
+    A server URN names our own mailbox whoever sent the message, as LinkedIn
+    renders it; ``server_urn=False`` gives a client placeholder URN instead.
     """
     head = ""
     if sender is not None:
@@ -78,9 +78,8 @@ def item(
             f'<time class="msg-s-message-group__timestamp">3:21 PM</time></div>'
         )
     urn = (
-        "urn:li:msg_message:(urn:li:fsd_profile:"
-        f"{urn_sender or sender or SELF_URN},{event_id})"
-        if named_by_urn
+        f"urn:li:msg_message:(urn:li:fsd_profile:{SELF_URN},{event_id})"
+        if server_urn
         else f"client-{event_id}"
     )
     return (
@@ -261,7 +260,7 @@ async def test_unknown_sender_fails_closed(dom_page):
         dom_page,
         thread_html(
             [
-                item("orphan", sender=None, event_id="1", named_by_urn=False),
+                item("orphan", sender=None, event_id="1"),
                 item("A", sender=RECIPIENT_URN, event_id="2"),
             ]
         ),
@@ -271,31 +270,18 @@ async def test_unknown_sender_fails_closed(dom_page):
     assert result["messages"] == []
 
 
-@pytest.mark.parametrize("named_by_urn", [True, False], ids=["event-urn", "header"])
-async def test_profile_link_in_a_reply_body_does_not_make_it_ours(
-    dom_page, named_by_urn
-):
-    # The recipient's unheaded follow-up linkifies another member. Only the
-    # event URN or the header links name a sender, never a link in the body.
+@pytest.mark.parametrize("server_urn", [True, False], ids=["server", "client"])
+async def test_profile_link_in_a_reply_body_does_not_make_it_ours(dom_page, server_urn):
+    # The recipient's unheaded follow-up linkifies another member. Only header
+    # links name a sender, never a link in the body.
     body = '<a href="https://www.linkedin.com/in/someone-else">Someone</a> can help'
     result = await _read(
         dom_page,
         thread_html(
             [
                 item("Hi, quick one.", sender=SELF_URN, event_id="1"),
-                item(
-                    "A",
-                    sender=RECIPIENT_URN,
-                    event_id="2",
-                    named_by_urn=named_by_urn,
-                ),
-                item(
-                    body,
-                    sender=None,
-                    event_id="3",
-                    urn_sender=RECIPIENT_URN,
-                    named_by_urn=named_by_urn,
-                ),
+                item("A", sender=RECIPIENT_URN, event_id="2"),
+                item(body, sender=None, event_id="3", server_urn=server_urn),
             ]
         ),
     )
@@ -303,22 +289,6 @@ async def test_profile_link_in_a_reply_body_does_not_make_it_ours(
     assert result["their_count"] == 2
     assert result["my_count"] == 1
     assert result["messages"][-1] == {"from_me": False, "text": "Someone can help"}
-
-
-async def test_event_urn_outranks_the_preceding_header(dom_page):
-    # An unheaded item whose server URN names the recipient is theirs even
-    # right after one of ours.
-    result = await _read(
-        dom_page,
-        thread_html(
-            [
-                item("Hi, quick one.", sender=SELF_URN, event_id="1"),
-                item("A", sender=None, event_id="2", urn_sender=RECIPIENT_URN),
-            ]
-        ),
-    )
-
-    assert (result["their_count"], result["my_count"]) == (1, 1)
 
 
 async def test_thread_still_changing_at_the_cap_is_an_error(dom_page):

@@ -183,17 +183,17 @@ _MESSAGE_ITEMS_JS = r"""
     const messageItemUrn = item => (item.getAttribute('data-event-urn') || '').trim();
 """
 
-# Shared by every program that tells whose a message is. An item names its own
-# sender in two places (measured 2026-10-16): its event URN,
-# urn:li:msg_message:(urn:li:fsd_profile:<sender URN>,<id>), and, when it heads
-# a message group, the header links to the sender's profile
-# (a.msg-s-event-listitem__link and the name link in
-# .msg-s-message-group__meta). The URN wins; header links are the fallback.
-# Links anywhere else in an item, such as a profile linkified in the message
-# body, never count. A follow-up from the same sender is assumed to name
-# neither, so the sender of a node is that of the nearest item at or before it
-# that names one: 'recipient' when it is the target, 'other' when it is
-# someone else, and null when no item at or before the node names a sender.
+# Shared by every program that tells whose a message is. LinkedIn heads a
+# message group with links to its sender's profile, around the avatar
+# (a.msg-s-event-listitem__link) and on the name in .msg-s-message-group__meta
+# (measured 2026-10-16). Only those header links count: a profile linkified in
+# a message body names nobody's message. The event URN is no evidence either:
+# urn:li:msg_message:(urn:li:fsd_profile:<id>,...) carries the signed-in
+# member's mailbox for every message, both sides alike (measured 2026-10-16).
+# A follow-up from the same sender is assumed to be unheaded, so the sender of
+# a node is that of the nearest item at or before it with a header:
+# 'recipient' when a header link is the target, 'other' when the header links
+# only someone else, and null when no item at or before the node is headed.
 # Only the link path counts, never its text.
 _MESSAGE_SENDER_JS = r"""
     const linksProfile = (anchor, target) => {
@@ -212,10 +212,6 @@ _MESSAGE_SENDER_JS = r"""
         );
     };
     const itemSender = (item, target) => {
-        const urn = /^urn:li:msg_message:\(urn:li:fsd_profile:([A-Za-z0-9_-]+),/.exec(
-            (item.getAttribute('data-event-urn') || '').trim()
-        )?.[1];
-        if (urn) return urn === target.profileUrn ? 'recipient' : 'other';
         const header = Array.from(item.querySelectorAll(
             'a.msg-s-event-listitem__link[href], .msg-s-message-group__meta a[href]'
         ));
