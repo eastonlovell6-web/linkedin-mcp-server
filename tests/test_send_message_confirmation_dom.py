@@ -1187,20 +1187,24 @@ class TestSendConfirmationDom:
         assert await entries.count() == 2
         assert (await entries.last.inner_text()).strip() == "Hi Ada."
 
-    async def test_garbled_multiline_write_is_cleared_and_retry_safe(self, dom_page):
+    async def test_garbled_multiline_write_is_left_and_not_retry_safe(self, dom_page):
+        # A composer that reflows after a paragraph break may be LinkedIn
+        # having taken the break as Send, so it is neither cleared nor retried.
         result = await send(
             dom_page,
             compose_page(FLATTEN_ON_PARAGRAPH_JS),
             message="Hi Ada.\n\nOne line.\nTwo lines.",
         )
 
-        assert result["status"] == "compose_interact_failed"
+        assert result["status"] == "send_unconfirmed"
         assert result["sent"] is False
-        assert result["retry_safe"] is True
+        assert result["retry_safe"] is False
         assert await dom_page.evaluate("document.body.dataset.clicked") is None
-        assert (await dom_page.locator("#composer").inner_text()).strip() == ""
+        assert (await dom_page.locator("#composer").inner_text()).strip() != ""
 
-    async def test_insert_failing_partway_is_cleared_and_retry_safe(self, dom_page):
+    async def test_insert_failing_after_a_break_is_left_and_not_retry_safe(
+        self, dom_page
+    ):
         await dom_page.goto(COMPOSE_URL)
         html = compose_page(NOOP_SEND_JS)
 
@@ -1234,10 +1238,10 @@ class TestSendConfirmationDom:
                 "fadi-eliwi", "Hi Ada.\n\nOne line.\nTwo lines.", confirm_send=True
             )
 
-        assert result["status"] == "compose_interact_failed"
-        assert result["retry_safe"] is True
+        assert result["status"] == "send_unconfirmed"
+        assert result["retry_safe"] is False
         assert await dom_page.evaluate("document.body.dataset.clicked") is None
-        assert (await dom_page.locator("#composer").inner_text()).strip() == ""
+        assert (await dom_page.locator("#composer").inner_text()).strip() != ""
 
     async def test_identical_multiline_history_confirms_the_new_send_once(
         self, dom_page

@@ -134,8 +134,21 @@ async def _text_and_clicked(page):
     return text, clicked
 
 
-async def test_garbled_insert_is_cleared_and_never_submitted(dom_page):
+# Reverses what an insertText put in: every character stays, the order breaks.
+REVERSE_SINGLE_LINE_JS = """<script>
+  document.querySelector('[contenteditable=true]').addEventListener(
+    'input', e => {
+      if (document.documentElement.dataset.garble && e.inputType === 'insertText') {
+        e.target.textContent = Array.from(e.target.textContent).reverse().join('');
+      }
+    });
+  document.documentElement.dataset.garble = 'yes';
+</script>"""
+
+
+async def test_garbled_paragraph_write_is_left_as_diverged(dom_page):
     # The editor flattens paragraph breaks, so the read-back no longer matches.
+    # After a break that may also be LinkedIn sending, so nothing is cleared.
     await _set_composer_content(
         dom_page,
         composer_html()
@@ -152,20 +165,43 @@ async def test_garbled_insert_is_cleared_and_never_submitted(dom_page):
     text, clicked = await _text_and_clicked(dom_page)
     await sender._dispose_message_owner(owner)
 
-    assert written in {"invalid", "unsupported"}
+    assert written == "diverged"
+    assert text.strip() != ""
+    assert clicked is None
+
+
+async def test_garbled_single_line_insert_is_cleared_and_never_submitted(dom_page):
+    await _set_composer_content(dom_page, composer_html() + REVERSE_SINGLE_LINE_JS)
+    sender, owner = await _owner(dom_page)
+    written = await sender._write_verified_message(
+        "One line only", target=_message_target(), owner=owner
+    )
+    text, clicked = await _text_and_clicked(dom_page)
+    await sender._dispose_message_owner(owner)
+
+    assert written == "invalid"
     assert text.strip() == ""
     assert clicked is None
 
 
-async def test_execcommand_failing_partway_clears_partial_text(dom_page):
+@pytest.mark.parametrize(
+    ("working_calls", "expected", "left"),
+    [(0, "unsupported", False), (3, "diverged", True)],
+    ids=["before_any_break", "after_a_break"],
+)
+async def test_execcommand_failing_partway(dom_page, working_calls, expected, left):
+    # Before any paragraph break a failed write is cleared and retry-safe;
+    # after one it may be LinkedIn having taken the break, so it stays put.
     await _set_composer_content(dom_page, composer_html())
     sender, owner = await _owner(dom_page)
     await dom_page.evaluate(
-        """() => {
+        """working => {
           const real = document.execCommand.bind(document);
           let calls = 0;
-          document.execCommand = (...args) => (++calls > 3 ? false : real(...args));
-        }"""
+          document.execCommand = (...args) =>
+            (++calls > working ? false : real(...args));
+        }""",
+        working_calls,
     )
     written = await sender._write_verified_message(
         PITCH, target=_message_target(), owner=owner
@@ -173,38 +209,26 @@ async def test_execcommand_failing_partway_clears_partial_text(dom_page):
     text, clicked = await _text_and_clicked(dom_page)
     await sender._dispose_message_owner(owner)
 
-    assert written == "unsupported"
-    assert text.strip() == ""
+    assert written == expected
+    assert (text.strip() != "") is left
     assert clicked is None
 
 
 async def test_retry_after_failed_write_is_not_occupied(dom_page):
-    await _set_composer_content(
-        dom_page,
-        composer_html()
-        + """<script>
-        document.documentElement.dataset.drop = 'yes';
-        document.querySelector('[contenteditable=true]').addEventListener(
-          'input', e => {
-            if (document.documentElement.dataset.drop && e.inputType === 'insertParagraph') {
-              e.target.textContent = e.target.textContent;
-            }
-          });
-        </script>""",
-    )
+    await _set_composer_content(dom_page, composer_html() + REVERSE_SINGLE_LINE_JS)
     sender, owner = await _owner(dom_page)
     first = await sender._write_verified_message(
-        PITCH, target=_message_target(), owner=owner
+        "One line only", target=_message_target(), owner=owner
     )
     await sender._dispose_message_owner(owner)
-    await dom_page.evaluate("() => { delete document.documentElement.dataset.drop; }")
+    await dom_page.evaluate("() => { delete document.documentElement.dataset.garble; }")
     sender, owner = await _owner(dom_page)  # a retry is a new tool call
     second = await sender._write_verified_message(
-        PITCH, target=_message_target(), owner=owner
+        "One line only", target=_message_target(), owner=owner
     )
     await sender._dispose_message_owner(owner)
 
-    assert first in {"invalid", "unsupported"}
+    assert first == "invalid"
     assert second == "written"
 
 
@@ -475,4 +499,106 @@ async def test_occupied_after_diverged_is_not_retry_safe(dom_page):
     assert retry["sent"] is False
     assert retry["retry_safe"] is False
     assert text.strip() != ""
+    assert clicked is None
+
+
+async def _assert_left_unconfirmed(page, result) -> str:
+    text, clicked = await _text_and_clicked(page)
+    assert result["status"] == "send_unconfirmed"
+    assert result["sent"] is False
+    assert result["retry_safe"] is False
+    assert await _cleared(page) is None
+    assert clicked is None
+    return text
+
+
+async def test_intercepted_paragraph_break_then_async_send_is_not_retry_safe(
+    dom_page,
+):
+    # LinkedIn intercepts the break (execCommand reports failure, nothing is
+    # inserted) and sends the first line 50 ms later. Chromium fires no
+    # beforeinput for execCommand, so the interception is stubbed in the
+    # evaluating world and the page is told by event to send.
+    await _set_composer_content(
+        dom_page,
+        thread_composer_html(
+            SEND_FIRST_LINE_JS
+            + """document.addEventListener('break-intercepted', () =>
+                   setTimeout(sendFirstLine, 50));"""
+        ),
+    )
+    await dom_page.evaluate(
+        """() => {
+          const real = document.execCommand.bind(document);
+          document.execCommand = (command, ...rest) => {
+            if (command !== 'insertParagraph') return real(command, ...rest);
+            document.dispatchEvent(new Event('break-intercepted'));
+            return false;
+          };
+        }"""
+    )
+
+    result = await _send(dom_page)
+    await dom_page.wait_for_function(
+        "() => document.querySelectorAll('[data-view-name=message-list-item]')"
+        ".length === 2"
+    )
+    text = await _assert_left_unconfirmed(dom_page, result)
+
+    assert text.strip() == ""  # LinkedIn sent it; we never cleared it
+
+
+@pytest.mark.parametrize("exit_path", ["disabled_timeout", "focus_lost"])
+async def test_submit_ready_exits_after_a_break_are_not_retry_safe(dom_page, exit_path):
+    # The Send LinkedIn queued from the break may land after the last poll.
+    script = "document.querySelector('form button').disabled = true;"
+    if exit_path == "focus_lost":
+        script += """
+          editor.addEventListener('input', () => setTimeout(() => {
+            editor.blur();
+            document.querySelector('form button').disabled = false;
+          }, 20), {once: true});"""
+    await _set_composer_content(dom_page, thread_composer_html(script))
+
+    result = await _send(dom_page)
+    text = await _assert_left_unconfirmed(dom_page, result)
+
+    assert text.strip() != ""  # the written text is left, not cleared
+
+
+@pytest.mark.parametrize(
+    "step", ["_write_verified_message", "_prepare_message_confirmation"]
+)
+async def test_errors_after_a_break_are_not_retry_safe(dom_page, step):
+    await _set_composer_content(dom_page, thread_composer_html(""))
+    original = getattr(MessageSender, step)
+
+    async def run_then_fail(self, *args, **kwargs):
+        await original(self, *args, **kwargs)
+        raise RuntimeError("evaluate round trip lost")
+
+    with patch.object(MessageSender, step, run_then_fail):
+        result = await _send(dom_page)
+    text = await _assert_left_unconfirmed(dom_page, result)
+
+    assert text.strip() != ""
+
+
+async def test_single_line_changed_at_submit_ready_stays_retry_safe(dom_page):
+    # No paragraph break went in, so nothing can have been sent.
+    await _set_composer_content(
+        dom_page,
+        thread_composer_html(
+            """document.querySelector('form button').disabled = true;
+               editor.addEventListener('input', () => setTimeout(() => {
+                 editor.textContent = 'Something else';
+               }, 20), {once: true});"""
+        ),
+    )
+
+    result = await _send(dom_page, "One line only")
+    _, clicked = await _text_and_clicked(dom_page)
+
+    assert result["status"] == "send_unavailable"
+    assert result["retry_safe"] is True
     assert clicked is None
