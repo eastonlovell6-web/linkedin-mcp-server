@@ -340,6 +340,58 @@ class TestProfileMessageTargetDom:
 
         assert result == {"status": "unresolved"}
 
+    # The shape measured on a live profile on 2026-10-19: a member whose
+    # practice is hiring gets a headingless "Hiring:" box as a section nested
+    # inside the top card.
+    _HIRING_BOX = """<section><div>
+          <a href="/jobs/view/123/">Hiring: Dental Receptionist</a>
+        </div></section>"""
+
+    async def test_resolves_top_card_wrapping_a_hiring_box(self, dom_page):
+        await _set_composer_content(
+            dom_page,
+            self._nested_page(
+                f"""<div><a href="/in/testuser/"><h2>Test User</h2></a></div>
+                {self._HIRING_BOX}
+                <div><a href="/messaging/compose/?recipient=ACoAAB">Message</a></div>"""
+            ),
+        )
+
+        result = await dom_page.evaluate(_PROFILE_MESSAGE_TARGET_JS)
+
+        assert result["status"] == "resolved"
+        assert result["displayName"] == "Test User"
+        assert result["composeHrefs"] == ["/messaging/compose/?recipient=ACoAAB"]
+
+    async def test_top_card_wrapping_a_hiring_box_without_its_name_is_unresolved(
+        self, dom_page
+    ):
+        await _set_composer_content(
+            dom_page,
+            self._nested_page(
+                f"""{self._HIRING_BOX}
+                <div><a href="/messaging/compose/?recipient=ACoAAB">Message</a></div>"""
+            ),
+        )
+
+        result = await dom_page.evaluate(_PROFILE_MESSAGE_TARGET_JS)
+
+        assert result == {"status": "unresolved"}
+
+    async def test_compose_link_inside_a_nested_box_fails_closed(self, dom_page):
+        await _set_composer_content(
+            dom_page,
+            self._nested_page(
+                """<h2>Test User</h2>
+                <section><a href="/messaging/compose/?recipient=OTHER">Message</a></section>
+                <a href="/messaging/compose/?recipient=ACoAAB">Message</a>"""
+            ),
+        )
+
+        result = await dom_page.evaluate(_PROFILE_MESSAGE_TARGET_JS)
+
+        assert result == {"status": "unresolved"}
+
 
 class TestMessageComposerDom:
     async def test_owner_handle_pins_one_dom_instance_and_disposes(self, dom_page):

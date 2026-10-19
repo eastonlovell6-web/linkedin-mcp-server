@@ -83,26 +83,40 @@ _PROFILE_MESSAGE_TARGET_JS = r"""() => {
     const main = document.querySelector('main');
     if (!main) return {status: 'unresolved'};
 
-    // The top card is the first section that wraps no other section. LinkedIn
+    // The top card is the first section that wraps no headed section. LinkedIn
     // nests it inside a wrapper section and has moved the name between h1 and
-    // h2, so neither its depth nor its heading level is pinned. It is chosen
-    // before its heading is checked, so a card whose name has not rendered yet
-    // stays unresolved instead of yielding to the next section. Sidebar
-    // sections are skipped: they carry other people's Message links.
+    // h2, so neither its depth nor its heading level is pinned. The card may
+    // itself wrap headingless boxes, such as the "Hiring:" box of a member
+    // whose practice is hiring (measured 2026-10-19); their content is not the
+    // card's. It is chosen before its heading is checked, so a card whose name
+    // has not rendered yet stays unresolved instead of yielding to the next
+    // section. Sidebar sections are skipped: they carry other people's Message
+    // links. A visible Message link inside a nested box fails closed.
+    const headingsOf = element => Array.from(
+        element.querySelectorAll('h1, h2, h3')
+    ).filter(visible);
     const section = Array.from(main.querySelectorAll('section')).find(
         element =>
             visible(element) &&
             !element.closest('aside') &&
-            !element.querySelector('section')
+            Array.from(element.querySelectorAll('section')).every(
+                nested => headingsOf(nested).length === 0
+            )
     );
     if (!section) return {status: 'unresolved'};
-    const headings = Array.from(section.querySelectorAll('h1, h2, h3')).filter(visible);
-    const visibleComposeAnchors = Array.from(
+    const headings = headingsOf(section).filter(
+        heading => heading.closest('section') === section
+    );
+    const allVisibleComposeAnchors = Array.from(
         section.querySelectorAll('a[href*="/messaging/compose/"]')
-    ).filter(anchor => visible(anchor) && anchor.closest('section') === section);
+    ).filter(visible);
+    const visibleComposeAnchors = allVisibleComposeAnchors.filter(
+        anchor => anchor.closest('section') === section
+    );
     const composeAnchors = visibleComposeAnchors.filter(active);
     if (
         headings.length !== 1 ||
+        allVisibleComposeAnchors.length !== visibleComposeAnchors.length ||
         composeAnchors.length > 1 ||
         (composeAnchors.length === 1 && visibleComposeAnchors.length !== 1)
     ) {
