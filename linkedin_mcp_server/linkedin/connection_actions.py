@@ -209,7 +209,14 @@ ACTION_SIGNALS_JS = (
   const connectScope = actionRoot || topCard;
   let hasConnectButton = false;
   let hasConnectStateAnchor = false;
-  for (const a of connectScope.querySelectorAll('a[componentkey*="ConnectButtonstate"]')) {
+  // Follow-only profiles keep Connect in the More menu, which LinkedIn renders
+  // in a portal outside <main> (live 2026-10-19). Once the caller has opened
+  // it, its [role="menu"] anchors count too; the rail is never a menu.
+  const connectAnchors = [
+    ...connectScope.querySelectorAll('a[componentkey*="ConnectButtonstate"]'),
+    ...document.querySelectorAll('[role="menu"] a[componentkey*="ConnectButtonstate"]'),
+  ];
+  for (const a of connectAnchors) {
     if (a.closest('aside')) continue;
     if ((a.getAttribute('componentkey') || '').endsWith('_connect')) {
       hasConnectButton = true;

@@ -167,3 +167,50 @@ class TestConnectButtonLayout:
         html = _page(_top_card(_connect_anchor(USER, "pending"), _connect_anchor(USER, "connect"), MESSAGE, MORE))
         state, _ = await _state(dom_page, html)
         assert state == "pending"
+
+
+FOLLOW = '<button type="button" aria-label="Follow Test User"><span>Follow</span></button>'
+MORE_OPEN = '<button type="button" aria-expanded="true"><span></span></button>'
+
+
+def _more_menu(*items: str) -> str:
+    """The open profile More menu. Live 2026-10-19 (wes-hinson): LinkedIn
+    renders it in a portal OUTSIDE <main>; Connect is an
+    <a role="menuitem"> with the same ConnectButtonstate componentkey."""
+    return '<div role="menu">' + "".join(items) + "</div>"
+
+
+def _menu_item(user: str, key_suffix: str | None, text: str) -> str:
+    key = f' componentkey="ConnectButtonstate:invitation:urn:li:member:5_{key_suffix}"' if key_suffix else ""
+    return f'<a role="menuitem" href="https://www.linkedin.com/in/{user}/"{key}><span>{text}</span></a>'
+
+
+def _page_with_portal(portal: str, *sections: str) -> str:
+    return f"<html><body><main>{''.join(sections)}</main>{portal}</body></html>"
+
+
+class TestMoreMenuConnect:
+    async def test_follow_only_with_connect_in_open_more_menu_is_connectable(self, dom_page):
+        menu = _more_menu(
+            '<div role="menuitem"><span>Save to PDF</span></div>',
+            _menu_item(USER, "connect", "Connect"),
+            _menu_item(USER, None, "Report"),
+        )
+        html = _page_with_portal(menu, _top_card(MESSAGE, FOLLOW, MORE_OPEN), _rail(USER, "7", "8"))
+        state, raw = await _state(dom_page, html)
+        assert raw["hasConnectButton"] is True
+        assert state == "connectable"
+
+    async def test_open_more_menu_without_connect_is_not_connectable(self, dom_page):
+        menu = _more_menu(_menu_item(USER, None, "Report"), _menu_item(USER, None, "Block"))
+        html = _page_with_portal(menu, _top_card(MESSAGE, FOLLOW, MORE_OPEN), _rail(USER, "7", "8"))
+        state, raw = await _state(dom_page, html)
+        assert raw["hasConnectButton"] is False
+        assert state != "connectable"
+
+    async def test_pending_in_open_more_menu_is_pending(self, dom_page):
+        menu = _more_menu(_menu_item(USER, "pending", "Pending"))
+        html = _page_with_portal(menu, _top_card(MESSAGE, FOLLOW, MORE_OPEN))
+        state, raw = await _state(dom_page, html)
+        assert raw["hasConnectStateAnchor"] is True
+        assert state == "pending"
