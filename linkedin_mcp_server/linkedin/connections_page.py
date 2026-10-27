@@ -119,7 +119,7 @@ class ConnectionsPageReader:
         except PlaywrightTimeoutError:
             logger.debug("connection cards did not appear within 10s")
         snapshot = await page.evaluate(CONNECTION_CARDS_JS)
-        if snapshot.get("sort") != EXPECTED_SORT:
+        if not self._sorted_recent_first(snapshot):
             return {
                 "url": page.url,
                 "sort": snapshot.get("sort"),
@@ -168,6 +168,27 @@ class ConnectionsPageReader:
             "reached_since": self._reached(cards, since),
             "unparsed": unparsed,
         }
+
+    @staticmethod
+    def _sorted_recent_first(snapshot: dict[str, Any]) -> bool:
+        """True when the list is in Recently added order.
+
+        The 2026-10-27 redesign dropped the "Sort by" control (the list is still
+        newest first), so with no control the order is checked from the cards'
+        dates instead: at least two, and none newer than the one above it.
+        """
+        sort = snapshot.get("sort")
+        if sort is not None:
+            return sort == EXPECTED_SORT
+        dates = [
+            d
+            for d in (
+                parse_connected_on(c.get("connected_text"))
+                for c in snapshot.get("cards", [])
+            )
+            if d is not None
+        ]
+        return len(dates) >= 2 and all(a >= b for a, b in zip(dates, dates[1:]))
 
     @staticmethod
     def _card_key(card: dict[str, Any]) -> tuple[str, ...]:

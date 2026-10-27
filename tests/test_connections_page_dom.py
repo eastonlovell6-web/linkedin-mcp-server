@@ -228,6 +228,64 @@ async def test_reader_returns_unexpected_sort_without_scrolling():
     assert result["connections"] == []
 
 
+async def test_reader_accepts_no_sort_control_when_dates_run_newest_first():
+    # 2026-10-27 redesign: no "Sort by" control; the list is still newest first.
+    first = {
+        "sort": None,
+        "cards": [
+            raw("ada", "Connected on October 27, 2026"),
+            raw("cy", "Connected recently"),
+            raw("bob", "Connected on October 26, 2026"),
+            raw("dee", "Connected on October 26, 2026"),
+        ],
+    }
+    second = {
+        "sort": None,
+        "cards": first["cards"] + [raw("eve", "Connected on October 20, 2026")],
+    }
+    reader, page, _ = reader_for([first, second])
+
+    result = await reader.read(date(2026, 10, 25))
+
+    assert "error" not in result
+    assert page.scrolls == 1
+    assert result["reached_since"] is True
+    assert [c["slug"] for c in result["connections"]] == [
+        "ada",
+        "cy",
+        "bob",
+        "dee",
+        "eve",
+    ]
+
+
+async def test_reader_rejects_no_sort_control_when_dates_are_out_of_order():
+    snap = {
+        "sort": None,
+        "cards": [
+            raw("ada", "Connected on October 20, 2026"),
+            raw("bob", "Connected on October 26, 2026"),
+        ],
+    }
+    reader, page, _ = reader_for([snap])
+
+    result = await reader.read(date(2026, 10, 25))
+
+    assert page.scrolls == 0
+    assert result["error"] == "unexpected_sort"
+    assert result["connections"] == []
+
+
+async def test_reader_rejects_no_sort_control_with_fewer_than_two_dated_cards():
+    snap = {"sort": None, "cards": [raw("ada", "Connected on October 27, 2026")]}
+    reader, page, _ = reader_for([snap])
+
+    result = await reader.read(date(2026, 10, 25))
+
+    assert page.scrolls == 0
+    assert result["error"] == "unexpected_sort"
+
+
 async def test_reader_counts_unparsed_cards():
     snap = {
         "sort": "Recently added",
