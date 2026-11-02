@@ -287,6 +287,37 @@ OPEN_MORE_BUTTON_JS = (
 """
 )
 
+# True once the profile's More button can open its menu. Live 2026-11-02
+# (cedric-lewis-830211b1, 2 of 6 loads): the More button first paints with
+# aria-label but no aria-expanded and only gains aria-expanded seconds later,
+# even after the top card's Connect wait has timed out; OPEN_MORE_BUTTON_JS
+# looks for button[aria-expanded], so clicking before then finds nothing and
+# a Connect hidden in the menu was reported as unavailable.
+MORE_BUTTON_READY_JS = (
+    r"""
+(() => {
+"""
+    + _FIND_ACTION_ROOT_FN_JS
+    + r"""
+  const main = document.querySelector('main');
+  if (!main) return false;
+  const actionRoot = findActionRoot(main);
+  return !!(actionRoot && actionRoot.querySelector('button[aria-expanded]'));
+})
+"""
+)
+
+# True once any [role="menu"] is actually rendered. Not
+# wait_for_selector("[role='menu']"): live 2026-11-02 (cedric-lewis-830211b1,
+# 3 of 6 loads) a profile video's hidden caption menus come first in the
+# document, so that wait timed out while the More menu was open with Connect.
+VISIBLE_MENU_JS = r"""
+(() => [...document.querySelectorAll('[role="menu"]')].some((m) => {
+  const r = m.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && getComputedStyle(m).visibility !== 'hidden';
+}))
+"""
+
 # Click Accept on an incoming-request profile. Accept is the FIRST labeled
 # button in the fingerprinted row — primary actions render first in
 # top-card action rows (Connect/Message lead on other profile states; the
@@ -459,7 +490,7 @@ class ConnectionActions:
             pass
         return "LinkedIn Premium upsell modal detected."
 
-    async def _open_more_menu(self) -> bool:
+    async def _open_more_menu(self, *, ready_timeout: int = 10000) -> bool:
         """Open the profile's More (three-dot) menu in a locale-independent way.
 
         Locates the More button structurally as ``actionRoot
@@ -475,6 +506,16 @@ class ConnectionActions:
         contents itself.
         """
         try:
+            await self._session.page.wait_for_function(
+                MORE_BUTTON_READY_JS, timeout=ready_timeout
+            )
+        except PlaywrightTimeoutError:
+            logger.info("More button never became ready (no aria-expanded)")
+            return False
+        except Exception:
+            logger.debug("Waiting for the More button failed", exc_info=True)
+            return False
+        try:
             clicked = await self._session.page.evaluate(OPEN_MORE_BUTTON_JS)
         except Exception:
             logger.debug("More button click via JS failed", exc_info=True)
@@ -482,10 +523,10 @@ class ConnectionActions:
         if not clicked:
             return False
         try:
-            await self._session.page.wait_for_selector("[role='menu']", timeout=3000)
+            await self._session.page.wait_for_function(VISIBLE_MENU_JS, timeout=3000)
             return True
         except PlaywrightTimeoutError:
-            logger.debug("More menu did not appear after click")
+            logger.info("More menu did not appear after click")
             return False
 
     async def _click_incoming_accept(self) -> bool:
@@ -891,6 +932,15 @@ class ConnectionActions:
         # has already failed, so reaching this branch already implies it.)
         if state == "follow_only":
             opened = await self._open_more_menu()
+            if not opened:
+                # Retryable, unlike connect_unavailable: Connect may sit in a
+                # menu that simply was not ready yet.
+                return _connection_result(
+                    url,
+                    "more_menu_unavailable",
+                    "LinkedIn's More menu did not open, so a Connect hidden in it could not be checked.",
+                    profile=page_text,
+                )
             if opened:
                 signals = await self._read_action_signals(username)
                 # Close the menu before any subsequent navigation so it

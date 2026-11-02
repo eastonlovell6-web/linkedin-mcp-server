@@ -15,8 +15,16 @@ from __future__ import annotations
 import pytest
 from patchright.async_api import async_playwright
 
-from linkedin_mcp_server.linkedin.connection import ActionSignals, detect_connection_state
-from linkedin_mcp_server.linkedin.connection_actions import ACTION_SIGNALS_JS
+from linkedin_mcp_server.linkedin.connection import (
+    ActionSignals,
+    detect_connection_state,
+)
+from linkedin_mcp_server.linkedin.connection_actions import (
+    ACTION_SIGNALS_JS,
+    ConnectionActions,
+)
+from linkedin_mcp_server.linkedin.navigation import PageNavigator
+from linkedin_mcp_server.linkedin.session import PageSession
 
 pytestmark = [pytest.mark.browser_dom, pytest.mark.xdist_group("browser_runtime")]
 
@@ -109,7 +117,9 @@ async def _state(page, html: str) -> tuple[str, dict]:
 
 class TestConnectButtonLayout:
     async def test_live_connect_layout_is_connectable(self, dom_page):
-        state, raw = await _state(dom_page, _page(_top_card(_connect_anchor(USER, "connect"), MESSAGE, MORE)))
+        state, raw = await _state(
+            dom_page, _page(_top_card(_connect_anchor(USER, "connect"), MESSAGE, MORE))
+        )
         assert raw["hasConnectButton"] is True
         assert raw["hasConnectStateAnchor"] is False
         assert state == "connectable"
@@ -122,13 +132,19 @@ class TestConnectButtonLayout:
         assert state != "connectable"
 
     async def test_connect_state_other_than_connect_is_pending(self, dom_page):
-        state, raw = await _state(dom_page, _page(_top_card(_connect_anchor(USER, "withdraw"), MESSAGE, MORE)))
+        state, raw = await _state(
+            dom_page, _page(_top_card(_connect_anchor(USER, "withdraw"), MESSAGE, MORE))
+        )
         assert raw["hasConnectButton"] is False
         assert raw["hasConnectStateAnchor"] is True
         assert state == "pending"
 
-    async def test_sidebar_connect_for_another_profile_is_not_connectable(self, dom_page):
-        state, raw = await _state(dom_page, _page(_top_card(MESSAGE, MORE), _sidebar_connect("someoneelse")))
+    async def test_sidebar_connect_for_another_profile_is_not_connectable(
+        self, dom_page
+    ):
+        state, raw = await _state(
+            dom_page, _page(_top_card(MESSAGE, MORE), _sidebar_connect("someoneelse"))
+        )
         assert raw["hasConnectButton"] is False
         assert raw["hasConnectStateAnchor"] is False
         assert state != "connectable"
@@ -150,7 +166,9 @@ class TestConnectButtonLayout:
 
     async def test_live_connectable_profile_with_rail_is_connectable(self, dom_page):
         connect = _connect_anchor(USER, "connect", "201307698")
-        html = _page_with_header(connect, _top_card(connect, MESSAGE, MORE), _rail(USER, "13489154"))
+        html = _page_with_header(
+            connect, _top_card(connect, MESSAGE, MORE), _rail(USER, "13489154")
+        )
         state, raw = await _state(dom_page, html)
         assert raw["hasConnectButton"] is True
         assert raw["hasConnectStateAnchor"] is False
@@ -159,17 +177,28 @@ class TestConnectButtonLayout:
     async def test_rail_connect_alone_is_not_connectable(self, dom_page):
         # A top card without a Connect control (e.g. 1st-degree) must not
         # borrow one from the rail, even though the rail links to this profile.
-        state, raw = await _state(dom_page, _page(_top_card(MESSAGE, MORE), _rail(USER, "1", "2")))
+        state, raw = await _state(
+            dom_page, _page(_top_card(MESSAGE, MORE), _rail(USER, "1", "2"))
+        )
         assert raw["hasConnectButton"] is False
         assert state != "connectable"
 
     async def test_pending_outranks_connect_in_the_top_card(self, dom_page):
-        html = _page(_top_card(_connect_anchor(USER, "pending"), _connect_anchor(USER, "connect"), MESSAGE, MORE))
+        html = _page(
+            _top_card(
+                _connect_anchor(USER, "pending"),
+                _connect_anchor(USER, "connect"),
+                MESSAGE,
+                MORE,
+            )
+        )
         state, _ = await _state(dom_page, html)
         assert state == "pending"
 
 
-FOLLOW = '<button type="button" aria-label="Follow Test User"><span>Follow</span></button>'
+FOLLOW = (
+    '<button type="button" aria-label="Follow Test User"><span>Follow</span></button>'
+)
 MORE_OPEN = '<button type="button" aria-expanded="true"><span></span></button>'
 
 
@@ -181,7 +210,11 @@ def _more_menu(*items: str) -> str:
 
 
 def _menu_item(user: str, key_suffix: str | None, text: str) -> str:
-    key = f' componentkey="ConnectButtonstate:invitation:urn:li:member:5_{key_suffix}"' if key_suffix else ""
+    key = (
+        f' componentkey="ConnectButtonstate:invitation:urn:li:member:5_{key_suffix}"'
+        if key_suffix
+        else ""
+    )
     return f'<a role="menuitem" href="https://www.linkedin.com/in/{user}/"{key}><span>{text}</span></a>'
 
 
@@ -190,20 +223,28 @@ def _page_with_portal(portal: str, *sections: str) -> str:
 
 
 class TestMoreMenuConnect:
-    async def test_follow_only_with_connect_in_open_more_menu_is_connectable(self, dom_page):
+    async def test_follow_only_with_connect_in_open_more_menu_is_connectable(
+        self, dom_page
+    ):
         menu = _more_menu(
             '<div role="menuitem"><span>Save to PDF</span></div>',
             _menu_item(USER, "connect", "Connect"),
             _menu_item(USER, None, "Report"),
         )
-        html = _page_with_portal(menu, _top_card(MESSAGE, FOLLOW, MORE_OPEN), _rail(USER, "7", "8"))
+        html = _page_with_portal(
+            menu, _top_card(MESSAGE, FOLLOW, MORE_OPEN), _rail(USER, "7", "8")
+        )
         state, raw = await _state(dom_page, html)
         assert raw["hasConnectButton"] is True
         assert state == "connectable"
 
     async def test_open_more_menu_without_connect_is_not_connectable(self, dom_page):
-        menu = _more_menu(_menu_item(USER, None, "Report"), _menu_item(USER, None, "Block"))
-        html = _page_with_portal(menu, _top_card(MESSAGE, FOLLOW, MORE_OPEN), _rail(USER, "7", "8"))
+        menu = _more_menu(
+            _menu_item(USER, None, "Report"), _menu_item(USER, None, "Block")
+        )
+        html = _page_with_portal(
+            menu, _top_card(MESSAGE, FOLLOW, MORE_OPEN), _rail(USER, "7", "8")
+        )
         state, raw = await _state(dom_page, html)
         assert raw["hasConnectButton"] is False
         assert state != "connectable"
@@ -214,3 +255,77 @@ class TestMoreMenuConnect:
         state, raw = await _state(dom_page, html)
         assert raw["hasConnectStateAnchor"] is True
         assert state == "pending"
+
+
+MORE_UNHYDRATED = (
+    '<button type="button" id="more" aria-label="More"><span></span></button>'
+)
+
+
+def _hydrate_more_after(ms: int) -> str:
+    """Live 2026-11-02 (cedric-lewis-830211b1, 2 of 6 loads): the More button
+    paints with aria-label but no aria-expanded, and gains aria-expanded
+    seconds later; the menu opens only after that."""
+    return (
+        "<script>setTimeout(() => {"
+        "const b = document.getElementById('more'); b.setAttribute('aria-expanded', 'false');"
+        "b.addEventListener('click', () => { b.setAttribute('aria-expanded', 'true');"
+        "const m = document.createElement('div'); m.setAttribute('role', 'menu');"
+        'm.innerHTML = \'<a role="menuitem" href="https://www.linkedin.com/in/testuser/" '
+        'componentkey="ConnectButtonstate:invitation:urn:li:member:5_connect"><span>Connect</span></a>\';'
+        "document.body.appendChild(m); });"
+        f"}}, {ms});</script>"
+    )
+
+
+def _connection_actions(page) -> ConnectionActions:
+    session = PageSession(page)
+
+    async def unread(_username: str):
+        raise AssertionError("not used")
+
+    return ConnectionActions(session, PageNavigator(session), unread)
+
+
+class TestMoreButtonHydration:
+    async def test_waits_for_more_button_to_hydrate_then_opens_menu(self, dom_page):
+        html = _page(_top_card(MESSAGE, FOLLOW, MORE_UNHYDRATED)).replace(
+            "</body>", _hydrate_more_after(1500) + "</body>"
+        )
+        await dom_page.set_content(html)
+        opened = await _connection_actions(dom_page)._open_more_menu()
+        assert opened is True
+        raw = await dom_page.evaluate(ACTION_SIGNALS_JS, USER)
+        assert raw["hasConnectButton"] is True
+
+    async def test_more_button_that_never_hydrates_reports_not_opened(self, dom_page):
+        await dom_page.set_content(_page(_top_card(MESSAGE, FOLLOW, MORE_UNHYDRATED)))
+        actions = _connection_actions(dom_page)
+        opened = await actions._open_more_menu(ready_timeout=500)
+        assert opened is False
+
+
+HIDDEN_PLAYER_MENU = (
+    '<div class="video-player" style="display:none"><div role="menu">'
+    '<div role="menuitem">subtitles settings</div></div></div>'
+)
+
+
+class TestMoreMenuBehindHiddenPlayerMenu:
+    async def test_opens_when_a_hidden_video_menu_comes_first(self, dom_page):
+        """Live 2026-11-02 (cedric-lewis-830211b1, 3 of 6 loads): a profile video
+        renders hidden caption menus with role="menu" before the More menu, so
+        waiting for the first [role=menu] to be visible timed out while the
+        real menu was open with Connect in it."""
+        html = (
+            "<html><body>"
+            + HIDDEN_PLAYER_MENU
+            + f"<main>{_top_card(MESSAGE, FOLLOW, MORE_UNHYDRATED)}</main>"
+            + _hydrate_more_after(0)
+            + "</body></html>"
+        )
+        await dom_page.set_content(html)
+        opened = await _connection_actions(dom_page)._open_more_menu()
+        assert opened is True
+        raw = await dom_page.evaluate(ACTION_SIGNALS_JS, USER)
+        assert raw["hasConnectButton"] is True
