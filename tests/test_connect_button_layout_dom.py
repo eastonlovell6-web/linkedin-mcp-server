@@ -469,3 +469,62 @@ class TestHalfLoadedTopCard:
         )._read_signals_through_more_menu(USER)
 
         assert state == "already_connected"
+
+
+# Live 2026-11-02 (Abby Smith-Nieves, viewed by a Sales Navigator account):
+# Follow + "Save in Sales Navigator" + More, no Message anchor in the row;
+# Message and Connect are both inside the More menu.
+SAVE_IN_SALES_NAV = (
+    '<button type="button" aria-label="Save as a lead in Sales Navigator">'
+    "<span>Save in Sales Navigator</span></button>"
+)
+VIDEO_PLAYER = (
+    "<div><video></video>"
+    '<button type="button" aria-label="Play"><svg></svg></button>'
+    '<button type="button" aria-label="Settings" aria-expanded="false"><svg></svg></button></div>'
+)
+
+
+class TestRowWithoutMessage:
+    async def test_follow_first_row_without_message_opens_more_and_finds_connect(
+        self, dom_page
+    ):
+        menu = _more_menu(
+            _menu_item(USER, None, "Message"),
+            _menu_item(USER, "connect", "Connect"),
+            _menu_item(USER, None, "Report"),
+        )
+        html = _page_with_portal(
+            SUBTITLES_MENU,
+            _top_card(FOLLOW, SAVE_IN_SALES_NAV, _late_more(menu, 800), mutual=True),
+            _rail(USER, "7"),
+        )
+        await _serve(dom_page, html)
+
+        signals, state, menu_failed = await _live_actions(
+            dom_page
+        )._read_signals_through_more_menu(USER, rowless_too=True)
+
+        assert menu_failed is False
+        assert signals.has_connect_button is True
+        assert state == "connectable"
+
+    async def test_row_without_message_and_no_connect_stays_unavailable(self, dom_page):
+        menu = _more_menu(_menu_item(USER, None, "Report"))
+        await _serve(
+            dom_page, _page(_top_card(FOLLOW, SAVE_IN_SALES_NAV, _late_more(menu, 200)))
+        )
+
+        _, state, menu_failed = await _live_actions(
+            dom_page
+        )._read_signals_through_more_menu(USER, rowless_too=True)
+
+        assert (state, menu_failed) == ("unavailable", False)
+
+    async def test_video_player_controls_are_not_the_action_row(self, dom_page):
+        from linkedin_mcp_server.linkedin.connection_actions import OPEN_MORE_BUTTON_JS
+
+        await dom_page.set_content(
+            _page(f"<section>{VIDEO_PLAYER}<h2>Test User</h2></section>")
+        )
+        assert await dom_page.evaluate(OPEN_MORE_BUTTON_JS) is False

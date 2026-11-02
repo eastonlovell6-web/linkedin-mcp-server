@@ -123,7 +123,7 @@
       "call": "connect_with_person",
       "kind": "evaluate",
       "operation": "connection_action_signals",
-      "program_digest": "095ba31c283f",
+      "program_digest": "0ededc934c5e",
       "section": "main_profile"
     }
   ],

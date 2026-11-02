@@ -82,6 +82,28 @@ function findActionRoot(main) {
       el = el.parentElement;
     }
   }
+  // No Message anchor in the row (live 2026-11-02, Abby Smith-Nieves seen by
+  // a Sales Navigator account: Follow + "Save in Sales Navigator" + More, with
+  // Message and Connect both inside the More menu). Anchor on the hydrated
+  // More button in the top card instead: the smallest ancestor holding another
+  // button that renders text (a primary action; video-player controls are
+  // icon-only) and no <video>. Never the rail (<aside>).
+  const topCard = main.querySelector('section') || main.firstElementChild || main;
+  for (const expander of topCard.querySelectorAll('button[aria-expanded]')) {
+    if (expander.closest('aside')) continue;
+    let el = expander.parentElement;
+    while (el && el !== main) {
+      const buttons = el.querySelectorAll('button');
+      if (buttons.length >= 2) {
+        const primary = [...buttons].some(
+          (b) => b !== expander && (b.textContent || '').trim()
+        );
+        if (primary && !el.querySelector('video')) return el;
+        break;
+      }
+      el = el.parentElement;
+    }
+  }
   return null;
 }
 """
@@ -643,13 +665,15 @@ class ConnectionActions:
             logger.debug("Top-card actions did not hydrate before reading signals")
 
     async def _read_signals_through_more_menu(
-        self, username: str
+        self, username: str, *, rowless_too: bool = False
     ) -> tuple[ActionSignals, connection.ConnectionState, bool]:
         """Read the top card, opening More when no Connect is in sight.
 
         Message-first and Follow-first rows (``already_connected`` /
-        ``follow_only``) can keep Connect under "…" (live 2026-11-02: Cedric
-        Lewis, Blake Ballenger, Mark Schenkman, all Message + Follow + "…").
+        ``follow_only``, or ``unavailable`` when the row has no Message
+        anchor) can keep Connect under "…" (live 2026-11-02: Cedric Lewis,
+        Blake Ballenger, Mark Schenkman, all Message + Follow + "…"; Abby
+        Smith-Nieves, Follow + Save in Sales Navigator + "…").
         A 1st-degree menu has no Connect anchor, so opening it there is a
         harmless read. The menu is closed before returning. Returns the
         signals, their state (classified once) and whether the menu was
@@ -657,10 +681,16 @@ class ConnectionActions:
         """
         signals = await self._read_action_signals(username)
         state = connection.detect_connection_state(signals)
-        if state not in ("follow_only", "already_connected"):
+        menu_states = ("follow_only", "already_connected")
+        if rowless_too:
+            # "unavailable" covers a row with no Message anchor (Follow + Save
+            # in Sales Navigator + More); a page with no row at all just fails
+            # to open a menu and stays unavailable, as before.
+            menu_states += ("unavailable",)
+        if state not in menu_states:
             return signals, state, False
         if not await self._open_more_menu():
-            return signals, state, True
+            return signals, state, state != "unavailable"
         signals = await self._read_action_signals(username)
         # Close the menu before any subsequent navigation so it doesn't
         # intercept the upcoming page transition.
@@ -969,7 +999,7 @@ class ConnectionActions:
         # the read opens it for them, so the state below already counts the
         # menu (a Pending there outranks everything, as in the top card).
         signals, state, menu_failed = await self._read_signals_through_more_menu(
-            username
+            username, rowless_too=True
         )
         logger.info(
             "Connection signals for %s: state=%s signals=%s", username, state, signals

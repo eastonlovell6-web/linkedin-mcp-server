@@ -987,7 +987,8 @@ class TestConnectWithPerson:
                 "https://de.linkedin.com/in/williamhgates"
             )
 
-        assert seen == ["williamhgates"]
+        # Every signal read (one, or two when the More menu is tried) gets the vanity.
+        assert seen and set(seen) == {"williamhgates"}
         read.assert_awaited_once_with("williamhgates")
 
 
