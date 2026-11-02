@@ -110,3 +110,63 @@ async def test_invite_note_is_sent_past_an_open_chat_overlay(dom_page):
     assert await dom_page.evaluate("document.body.dataset.invite") == "sent"
     assert await dom_page.evaluate("document.body.dataset.note") == "Hello"
     assert await dom_page.evaluate("document.body.dataset.chat") is None
+
+
+# Live 2026-10-30 (Adora C.): "To verify this member knows you, please enter
+# their email to connect." An <input type="email" name="email">, Dismiss,
+# "Add a note", and "Send without a note" disabled until the field has a value.
+EMAIL_DIALOG = """
+  <div role="dialog" id="invite">
+    <h2>Add a note to your invitation?</h2>
+    <p>To verify this member knows you, please enter their email to connect.</p>
+    <input type="email" name="email" id="ember45"
+      oninput="document.getElementById('send').disabled = !this.value">
+    <button aria-label="Dismiss"></button>
+    <button aria-label="Add a note">Add a note</button>
+    <button id="send" aria-label="Send without a note" disabled
+      onclick="document.body.dataset.invite = 'sent';
+        document.body.dataset.email = document.getElementById('ember45').value;
+        document.getElementById('invite').remove()">Send without a note</button>
+  </div>
+"""
+
+
+async def test_email_gate_is_recognised(dom_page):
+    await dom_page.set_content(
+        f"<!DOCTYPE html><html><body>{EMAIL_DIALOG}</body></html>"
+    )
+    assert await _actions(dom_page)._invite_asks_for_email() is True
+
+
+async def test_plain_invite_is_not_an_email_gate(dom_page):
+    await dom_page.set_content(
+        f"<!DOCTYPE html><html><body>{INVITE_DIALOG}{CHAT_OVERLAY}</body></html>"
+    )
+    assert await _actions(dom_page)._invite_asks_for_email() is False
+
+
+async def test_email_gate_sends_once_the_email_is_entered(dom_page):
+    await dom_page.set_content(
+        f"<!DOCTYPE html><html><body>{EMAIL_DIALOG}</body></html>"
+    )
+    actions = _actions(dom_page)
+
+    assert await actions._fill_invite_email("member@example.com") is True
+    submitted, note_sent, note_limit = await actions._submit_invite_dialog(None)
+
+    assert (submitted, note_sent, note_limit) == (True, False, None)
+    assert await dom_page.evaluate("document.body.dataset.invite") == "sent"
+    assert (
+        await dom_page.evaluate("document.body.dataset.email") == "member@example.com"
+    )
+
+
+async def test_email_gate_without_an_email_never_sends(dom_page):
+    await dom_page.set_content(
+        f"<!DOCTYPE html><html><body>{EMAIL_DIALOG}</body></html>"
+    )
+
+    submitted, _, _ = await _actions(dom_page)._submit_invite_dialog(None)
+
+    assert submitted is False
+    assert await dom_page.evaluate("document.body.dataset.invite") is None

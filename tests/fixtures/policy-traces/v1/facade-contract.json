@@ -18,7 +18,7 @@
       },
       "connect_with_person": {
         "coroutine": true,
-        "signature": "(self, username: 'str', *, note: 'str | None' = None) -> 'dict[str, Any]'"
+        "signature": "(self, username: 'str', *, note: 'str | None' = None, email: 'str | None' = None) -> 'dict[str, Any]'"
       },
       "extract_feed": {
         "coroutine": true,
@@ -129,6 +129,18 @@
         "input": {
           "additionalProperties": false,
           "properties": {
+            "email": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The member's email address. Used only when LinkedIn's\ninvite dialog asks for it (\"To verify this member knows you,\nplease enter their email\"); otherwise ignored."
+            },
             "linkedin_username": {
               "description": "LinkedIn username (e.g., \"stickerdaniel\", \"williamhgates\"). A full profile URL is accepted too and is reduced to the username.",
               "type": "string"

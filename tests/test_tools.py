@@ -657,6 +657,7 @@ class TestPersonTool:
         mock_extractor.connect_with_person.assert_awaited_once_with(
             "test-user",
             note="Let us connect.",
+            email=None,
         )
 
     async def test_connect_with_person_no_note(self, mock_context, serve_extractor):
@@ -684,6 +685,7 @@ class TestPersonTool:
         mock_extractor.connect_with_person.assert_awaited_once_with(
             "test-user",
             note=None,
+            email=None,
         )
 
     async def test_connect_with_person_custom_note_limit_reached(
@@ -720,6 +722,7 @@ class TestPersonTool:
         mock_extractor.connect_with_person.assert_awaited_once_with(
             "test-user",
             note="Hello!",
+            email=None,
         )
 
     async def test_connect_with_person_auth_error(self, monkeypatch):

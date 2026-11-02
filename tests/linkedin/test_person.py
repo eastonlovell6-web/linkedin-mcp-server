@@ -17,6 +17,7 @@ from linkedin_mcp_server.core.exceptions import (
     AuthenticationError,
     InvalidReferenceError,
     LinkedInOperationError,
+    ProfileNotFoundError,
     ProxyConnectionError,
 )
 from linkedin_mcp_server.linkedin import person as person_module
@@ -783,6 +784,53 @@ class TestReadPersonSectionOutcomes:
         # The second section was never fetched, so its side effect is unused.
         assert mock_extract.await_count == 1
         assert "posts" not in result["sections"]
+
+    @pytest.mark.parametrize(
+        "landed",
+        ["https://www.linkedin.com/in/", "https://www.linkedin.com/404/"],
+        ids=["bare-in", "404"],
+    )
+    async def test_a_dead_profile_is_not_found_not_rate_limited(
+        self, mock_page, landed
+    ):
+        """Live 2026-11-02: a deleted profile redirects to the bare /in/ page,
+        footer chrome only, which capture reports as a rate limit. Calling it
+        that paused the caller for 72 hours; it is a missing profile."""
+        reader = _reader(mock_page)
+        mock_page.url = landed
+        with (
+            patch.object(
+                reader._capture,
+                "capture",
+                new_callable=AsyncMock,
+                return_value=extracted(RATE_LIMITED_SECTION_TEXT),
+            ),
+            patch(
+                "linkedin_mcp_server.linkedin.session.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            pytest.raises(ProfileNotFoundError),
+        ):
+            await reader.read_person("gone-member", {"posts"})
+
+    async def test_a_throttle_on_a_live_profile_stays_a_rate_limit(self, mock_page):
+        reader = _reader(mock_page)
+        mock_page.url = "https://www.linkedin.com/in/testuser/"
+        with (
+            patch.object(
+                reader._capture,
+                "capture",
+                new_callable=AsyncMock,
+                return_value=extracted(RATE_LIMITED_SECTION_TEXT),
+            ),
+            patch(
+                "linkedin_mcp_server.linkedin.session.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+        ):
+            result = await reader.read_person("testuser", set())
+
+        assert result["section_errors"]["main_profile"]["error_type"] == "rate_limit"
 
     async def test_a_failing_urn_read_cannot_bury_the_rate_limit(self, mock_page):
         """The URN read is skipped once throttled, so it cannot overwrite it.

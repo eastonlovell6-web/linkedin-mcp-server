@@ -128,9 +128,12 @@ class LinkedInExtractor:
         username: str,
         *,
         note: str | None = None,
+        email: str | None = None,
     ) -> dict[str, Any]:
         """Send a LinkedIn connection request or accept an incoming one."""
-        return await self._connection.connect_with_person(username, note=note)
+        return await self._connection.connect_with_person(
+            username, note=note, email=email
+        )
 
     async def get_sidebar_profiles(self, username: str) -> dict[str, Any]:
         """Extract profile links from sidebar sections on a profile page."""

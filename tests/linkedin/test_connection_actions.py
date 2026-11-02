@@ -13,6 +13,8 @@ a mock, so the JS never executes and the signals are supplied directly.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,7 +22,10 @@ import pytest
 from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from linkedin_mcp_server.linkedin.connection import ActionSignals
-from linkedin_mcp_server.linkedin.connection_actions import ConnectionActions
+from linkedin_mcp_server.linkedin.connection_actions import (
+    TOP_CARD_READY_JS,
+    ConnectionActions,
+)
 from linkedin_mcp_server.linkedin.navigation import PageNavigator
 from linkedin_mcp_server.linkedin.session import PageSession
 
@@ -186,7 +191,7 @@ class TestConnectWithPerson:
     ):
         text = "Jane\n\n· 2nd\n\nPending\nMessage\nMore\n"
         actions = _actions(mock_page, _reads(text))
-        mock_page.wait_for_selector = AsyncMock(return_value=None)
+        mock_page.wait_for_function = AsyncMock(return_value=None)
         with patch.object(
             actions,
             "_read_action_signals",
@@ -196,8 +201,9 @@ class TestConnectWithPerson:
             ),
         ):
             await actions.connect_with_person("testuser")
-        selector = mock_page.wait_for_selector.await_args.args[0]
-        assert "ConnectButtonstate" in selector
+        assert (
+            mock_page.wait_for_function.await_args_list[0].args[0] == TOP_CARD_READY_JS
+        )
 
     async def test_a_missing_connect_control_after_the_wait_does_not_raise(
         self, mock_page
@@ -319,6 +325,11 @@ class TestConnectWithPerson:
                     retry_signals,
                 ],
             ),
+            # The verify read would open More on a Message-first row;
+            # these cases are about the settle retry, so no menu here.
+            patch.object(
+                actions, "_open_more_menu", new_callable=AsyncMock, return_value=False
+            ),
             patch.object(PageNavigator, "_navigate_to_page", new_callable=AsyncMock),
             patch.object(
                 actions, "_dialog_is_open", new_callable=AsyncMock, return_value=True
@@ -363,6 +374,11 @@ class TestConnectWithPerson:
                     retry_signals,
                 ],
             ),
+            # The verify read would open More on a Message-first row;
+            # these cases are about the settle retry, so no menu here.
+            patch.object(
+                actions, "_open_more_menu", new_callable=AsyncMock, return_value=False
+            ),
             patch.object(PageNavigator, "_navigate_to_page", new_callable=AsyncMock),
             patch.object(
                 actions, "_dialog_is_open", new_callable=AsyncMock, return_value=True
@@ -381,6 +397,118 @@ class TestConnectWithPerson:
             result = await actions.connect_with_person("testuser")
 
         assert result["status"] == "send_failed"
+
+    async def test_message_only_row_whose_menu_never_opens_is_not_connected(
+        self, mock_page
+    ):
+        """Message + More with no Follow is either 1st degree or a Connect
+        kept under "…" (live 2026-11-02). If the menu will not open, nothing
+        proves which, so it must not be recorded as a connection."""
+        text = "Jane\n\n· 3rd\n\nMessage\nMore\n"
+        actions = _actions(mock_page, _reads(text))
+        with (
+            patch.object(
+                actions,
+                "_read_action_signals",
+                new_callable=AsyncMock,
+                return_value=_signals(compose=True),
+            ),
+            patch.object(
+                actions, "_open_more_menu", new_callable=AsyncMock, return_value=False
+            ),
+            patch.object(
+                PageNavigator, "_navigate_to_page", new_callable=AsyncMock
+            ) as mock_nav,
+        ):
+            result = await actions.connect_with_person("testuser")
+
+        assert result["status"] == "more_menu_unavailable"
+        mock_nav.assert_not_awaited()
+
+    def _email_gate(self, stack, actions, *, dialog_open_after: bool):
+        """A connectable profile whose invite dialog asks for the email.
+
+        Returns the fill, submit and dismiss mocks."""
+        mocks = [
+            stack.enter_context(p)
+            for p in (
+                patch.object(
+                    actions,
+                    "_read_action_signals",
+                    new_callable=AsyncMock,
+                    side_effect=[_signals(invite=True), _signals(labeled_anchor=True)],
+                ),
+                patch.object(
+                    PageNavigator, "_navigate_to_page", new_callable=AsyncMock
+                ),
+                patch.object(
+                    actions,
+                    "_invite_asks_for_email",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch.object(
+                    actions,
+                    "_fill_invite_email",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch.object(
+                    actions,
+                    "_submit_invite_dialog",
+                    new_callable=AsyncMock,
+                    return_value=(True, False, None),
+                ),
+                patch.object(
+                    actions,
+                    "_dialog_is_open",
+                    new_callable=AsyncMock,
+                    return_value=dialog_open_after,
+                ),
+                patch.object(actions, "_dismiss_dialog", new_callable=AsyncMock),
+            )
+        ]
+        return mocks[3], mocks[4], mocks[6]
+
+    async def test_email_gate_without_email_sends_nothing(self, mock_page):
+        text = "Jane\n\n· 3rd\n\nConnect\nMore\n"
+        actions = _actions(mock_page, _reads(text))
+        with ExitStack() as stack:
+            fill, submit, dismiss = self._email_gate(
+                stack, actions, dialog_open_after=False
+            )
+            result = await actions.connect_with_person("testuser")
+
+        assert result["status"] == "email_required"
+        fill.assert_not_awaited()
+        submit.assert_not_awaited()
+        dismiss.assert_awaited_once()
+
+    async def test_email_gate_with_email_fills_it_and_sends(self, mock_page):
+        text = "Jane\n\n· 3rd\n\nConnect\nMore\n"
+        post = "Jane\n\n· 3rd\n\nPending\nMore\n"
+        actions = _actions(mock_page, _reads(text, post))
+        with ExitStack() as stack:
+            fill, submit, _ = self._email_gate(stack, actions, dialog_open_after=False)
+            result = await actions.connect_with_person(
+                "testuser", email="jane@example.com"
+            )
+
+        assert result["status"] == "connected"
+        fill.assert_awaited_once_with("jane@example.com")
+        submit.assert_awaited_once()
+
+    async def test_email_gate_with_a_rejected_email_reports_it(self, mock_page):
+        text = "Jane\n\n· 3rd\n\nConnect\nMore\n"
+        actions = _actions(mock_page, _reads(text))
+        with ExitStack() as stack:
+            _, _, dismiss = self._email_gate(stack, actions, dialog_open_after=True)
+            result = await actions.connect_with_person(
+                "testuser", email="wrong@example.com"
+            )
+
+        assert result["status"] == "email_rejected"
+        dismiss.assert_awaited_once()
 
     async def test_connectable_no_dialog_returns_connect_unavailable(self, mock_page):
         """Deeplink opened but no dialog appeared → connect_unavailable."""

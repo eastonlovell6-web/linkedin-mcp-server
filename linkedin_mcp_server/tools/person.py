@@ -241,6 +241,7 @@ def register_person_tools(
         linkedin_username: str,
         ctx: Context,
         note: str | None = None,
+        email: str | None = None,
     ) -> dict[str, Any]:
         """
         Send a LinkedIn connection request or accept an incoming one.
@@ -252,13 +253,20 @@ def register_person_tools(
             linkedin_username: LinkedIn username (e.g., "stickerdaniel", "williamhgates"). A full profile URL is accepted too and is reduced to the username.
             ctx: FastMCP context for progress reporting
             note: Optional note to include with the invitation
+            email: The member's email address. Used only when LinkedIn's
+                invite dialog asks for it ("To verify this member knows you,
+                please enter their email"); otherwise ignored.
 
         Returns:
             Dict with url, status, message, and note_sent.
             Statuses: pending, already_connected, follow_only,
             connect_unavailable, unavailable, send_failed,
             note_not_supported, custom_note_limit_reached,
-            connected, or accepted.
+            email_required, email_rejected, connected, or accepted.
+
+            ``email_required`` means LinkedIn asked for the member's email
+            and none was given; ``email_rejected`` means the given address
+            was not accepted. Nothing was sent in either case.
 
             ``connected`` means this call submitted the invitation and the
             re-read profile no longer exposes Connect; it does not mean a
@@ -296,6 +304,7 @@ def register_person_tools(
             result = await extractor.connect_with_person(
                 linkedin_username,
                 note=note,
+                email=email,
             )
 
             await ctx.report_progress(progress=100, total=100, message="Complete")

@@ -10,7 +10,10 @@ import re
 
 from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from linkedin_mcp_server.core.exceptions import LinkedInOperationError
+from linkedin_mcp_server.core.exceptions import (
+    LinkedInOperationError,
+    ProfileNotFoundError,
+)
 from linkedin_mcp_server.error_diagnostics import build_issue_diagnostics
 from linkedin_mcp_server.linkedin.capture import (
     CaptureMode,
@@ -23,6 +26,7 @@ from linkedin_mcp_server.linkedin.contracts import (
 )
 from linkedin_mcp_server.linkedin.fields import PERSON_SECTIONS, _person_section_specs
 from linkedin_mcp_server.linkedin.identifiers import (
+    is_missing_profile_page,
     normalize_person_identifier,
     person_profile_url,
 )
@@ -279,6 +283,17 @@ class PersonReader:
                             plan=spec.plan,
                         )
 
+                    if (
+                        section_name == "main_profile"
+                        and extracted.text in ("", RATE_LIMITED_SECTION_TEXT)
+                        and is_missing_profile_page(self._session.page.url)
+                    ):
+                        # A dead profile, not a throttle: telling the caller
+                        # to back off would pause it for nothing.
+                        raise ProfileNotFoundError(
+                            f"LinkedIn has no profile at {base_url}/ "
+                            f"(it redirected to {self._session.page.url})."
+                        )
                     if extracted.text and extracted.text != RATE_LIMITED_SECTION_TEXT:
                         sections[section_name] = extracted.text
                         if extracted.references:

@@ -453,6 +453,20 @@ def person_profile_url(identifier: str, suffix: str = "") -> str:
     return f"https://www.linkedin.com/in/{quote(identifier, safe='')}{suffix}"
 
 
+def is_missing_profile_page(url: object) -> bool:
+    """Whether a profile navigation landed on LinkedIn's "no such member" page.
+
+    LinkedIn answers a deleted or mistyped ``/in/<slug>/`` with a redirect to
+    the bare ``/in/`` path (live 2026-11-02, nicole-m-matthews-dds-b9a8401ba)
+    or to ``/404/``. Either page holds only footer chrome, which capture's
+    chrome-only check reports as a rate limit.
+    """
+    if not isinstance(url, str):
+        return False
+    path = urlparse(url).path.rstrip("/")
+    return path in ("/in", "/404")
+
+
 def company_page_url(identifier: str, suffix: str = "") -> str:
     """Company page URL for an already-normalized slug, escaped as one segment."""
     return f"https://www.linkedin.com/company/{quote(identifier, safe='')}{suffix}"

@@ -329,3 +329,143 @@ class TestMoreMenuBehindHiddenPlayerMenu:
         assert opened is True
         raw = await dom_page.evaluate(ACTION_SIGNALS_JS, USER)
         assert raw["hasConnectButton"] is True
+
+
+# Live 2026-11-02 (Cedric Lewis, Blake Ballenger, Mark Schenkman): a
+# Message-first row, Message + Follow + "…", where "…" first paints as a bare
+# <button aria-label="More"> with no aria-expanded and no handler, and gains
+# both a second or more later. Connect is only in the menu it opens. The page
+# also keeps the video player's hidden [role="menu"] (subtitles).
+PROFILE_URL = f"https://www.linkedin.com/in/{USER}/"
+SUBTITLES_MENU = (
+    '<div role="menu" style="display:none"><li>subtitles settings</li></div>'
+)
+
+
+def _late_more(menu: str, delay_ms: int) -> str:
+    """A More button that only hydrates (aria-expanded + click handler)
+    after ``delay_ms``; its click mounts ``menu`` in a portal."""
+    return (
+        '<button type="button" id="more" aria-label="More"><svg></svg></button>'
+        "<script>setTimeout(() => {"
+        "const b = document.getElementById('more');"
+        "b.setAttribute('aria-expanded', 'false');"
+        "b.addEventListener('click', () => {"
+        "b.setAttribute('aria-expanded', 'true');"
+        f"document.body.insertAdjacentHTML('beforeend', {menu!r});"
+        "});"
+        f"}}, {delay_ms});</script>"
+    )
+
+
+async def _serve(page, html: str) -> None:
+    async def fulfill(route):
+        await route.fulfill(body=html, content_type="text/html")
+
+    await page.route(PROFILE_URL, fulfill)
+    await page.goto(PROFILE_URL)
+
+
+def _live_actions(page):
+    from typing import Any, cast
+
+    from patchright.async_api import Page
+
+    from linkedin_mcp_server.linkedin.connection_actions import ConnectionActions
+    from linkedin_mcp_server.linkedin.navigation import PageNavigator
+    from linkedin_mcp_server.linkedin.session import PageSession
+
+    async def unreachable(_username: str) -> dict[str, Any]:
+        raise AssertionError("these cases never read a profile")
+
+    session = PageSession(cast(Page, page))
+    return ConnectionActions(session, PageNavigator(session), unreachable)
+
+
+class TestHalfLoadedTopCard:
+    async def test_message_and_labelled_more_is_connected_not_follow_only(
+        self, dom_page
+    ):
+        # The 2026-10 More carries aria-label; it is the menu opener, not an action.
+        state, raw = await _state(dom_page, _page(_top_card(MESSAGE, MORE)))
+        assert raw["hasLabeledActionButton"] is False
+        assert state == "already_connected"
+
+    async def test_message_follow_more_is_still_follow_only(self, dom_page):
+        state, _ = await _state(dom_page, _page(_top_card(MESSAGE, FOLLOW, MORE)))
+        assert state == "follow_only"
+
+    async def test_top_card_is_not_ready_until_more_hydrates(self, dom_page):
+        from linkedin_mcp_server.linkedin.connection_actions import TOP_CARD_READY_JS
+
+        await dom_page.set_content(
+            _page(_top_card(MESSAGE, FOLLOW, MORE), _rail(USER, "7"))
+        )
+        assert (
+            await dom_page.evaluate(TOP_CARD_READY_JS) is False
+        )  # rail Connect doesn't count
+        await dom_page.evaluate(
+            "document.querySelector('main section button[aria-label=More]')"
+            ".setAttribute('aria-expanded', 'false')"
+        )
+        assert await dom_page.evaluate(TOP_CARD_READY_JS) is True
+
+    async def test_hidden_player_menu_is_not_the_more_menu(self, dom_page):
+        from linkedin_mcp_server.linkedin.connection_actions import MORE_MENU_OPEN_JS
+
+        await _serve(
+            dom_page,
+            _page_with_portal(SUBTITLES_MENU, _top_card(MESSAGE, FOLLOW, MORE)),
+        )
+        assert await dom_page.evaluate(MORE_MENU_OPEN_JS) is False
+
+    @pytest.mark.parametrize(
+        "requested", [USER, "old-vanity-name-123"], ids=["slug", "redirected-slug"]
+    )
+    async def test_connect_under_a_late_hydrating_more_is_found(
+        self, dom_page, requested
+    ):
+        menu = _more_menu(
+            '<div role="menuitem"><span>Save to PDF</span></div>',
+            _menu_item(USER, "connect", "Connect"),
+            _menu_item(USER, None, "Report"),
+        )
+        html = _page_with_portal(
+            SUBTITLES_MENU,
+            _top_card(MESSAGE, FOLLOW, _late_more(menu, 1500)),
+            _rail(USER, "7", "8"),
+        )
+        await _serve(dom_page, html)
+
+        signals, state, menu_failed = await _live_actions(
+            dom_page
+        )._read_signals_through_more_menu(requested)
+
+        assert menu_failed is False
+        assert signals.has_connect_button is True
+        assert state == "connectable"
+
+    async def test_message_only_row_with_connect_in_menu_is_connectable(self, dom_page):
+        menu = _more_menu(
+            _menu_item(USER, "connect", "Connect"), _menu_item(USER, None, "Report")
+        )
+        await _serve(dom_page, _page(_top_card(MESSAGE, _late_more(menu, 300))))
+
+        _, state, menu_failed = await _live_actions(
+            dom_page
+        )._read_signals_through_more_menu(USER)
+
+        assert state == "connectable"
+
+    async def test_first_degree_menu_without_connect_stays_connected(self, dom_page):
+        menu = _more_menu(
+            _menu_item(USER, None, "Remove connection"),
+            _menu_item(USER, None, "Report"),
+        )
+        await _serve(dom_page, _page(_top_card(MESSAGE, _late_more(menu, 300))))
+
+        _, state, menu_failed = await _live_actions(
+            dom_page
+        )._read_signals_through_more_menu(USER)
+
+        assert state == "already_connected"

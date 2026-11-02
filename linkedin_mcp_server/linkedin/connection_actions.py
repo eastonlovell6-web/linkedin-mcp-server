@@ -53,6 +53,13 @@ _DIALOG_PREMIUM_LINK_SELECTOR = (
     'dialog[open] a[href*="/premium/"], [role="dialog"] a[href*="/premium/"]'
 )
 _DIALOG_TEXTAREA_SELECTOR = '[role="dialog"] textarea, dialog textarea'
+# Some members only take invitations from people who know their email. The
+# invite dialog then holds an <input type="email" name="email"> and keeps
+# "Send without a note" disabled until it is filled (live 2026-10-30, Adora C.).
+_DIALOG_EMAIL_SELECTOR = (
+    f'dialog[open]{_NOT_MESSAGING} input[type="email"], '
+    f'[role="dialog"]{_NOT_MESSAGING} input[type="email"]'
+)
 
 # Shared JS function that walks up from any /messaging/compose/ anchor
 # inside <main> to find the smallest ancestor that satisfies the
@@ -76,6 +83,24 @@ function findActionRoot(main) {
     }
   }
   return null;
+}
+"""
+
+# Shared JS function that finds the profile More ("…") button inside the
+# action root. Once LinkedIn has hydrated it, the opener is the one button
+# carrying ``aria-expanded``. Live 2026-11-02 the 2026-10 top card first paints
+# it as a bare ``<button aria-label>`` with no ``aria-expanded`` and no text
+# (an icon only), and adds ``aria-expanded`` a second or more later; until
+# then it is the only button in the row that renders no text. Text *presence*
+# is structural, no label value is read. Ambiguity returns null.
+_FIND_MORE_BUTTON_FN_JS = r"""
+function findMoreButton(actionRoot) {
+  const expanders = actionRoot.querySelectorAll('button[aria-expanded]');
+  if (expanders.length) return expanders[0];
+  const iconOnly = [...actionRoot.querySelectorAll('button')].filter(
+    (b) => !(b.textContent || '').trim()
+  );
+  return iconOnly.length === 1 ? iconOnly[0] : null;
 }
 """
 
@@ -183,6 +208,7 @@ ACTION_SIGNALS_JS = (
 ((username) => {
 """
     + _FIND_ACTION_ROOT_FN_JS
+    + _FIND_MORE_BUTTON_FN_JS
     + _FIND_INCOMING_ACTION_ROW_FN_JS
     + r"""
   const main = document.querySelector('main');
@@ -231,7 +257,11 @@ ACTION_SIGNALS_JS = (
   if (actionRoot) {
     hasComposeInActionRoot =
       !!actionRoot.querySelector('a[href*="/messaging/compose/"]');
+    // The 2026-10 More button carries aria-label too; it is the menu opener,
+    // not a primary action, so a Message + More row stays "connected".
+    const more = findMoreButton(actionRoot);
     for (const b of actionRoot.querySelectorAll('button')) {
+      if (b === more || b.hasAttribute('aria-expanded')) continue;
       if (b.hasAttribute('aria-label')) {
         hasLabeledActionButton = true;
         break;
@@ -274,12 +304,13 @@ OPEN_MORE_BUTTON_JS = (
 (() => {
 """
     + _FIND_ACTION_ROOT_FN_JS
+    + _FIND_MORE_BUTTON_FN_JS
     + r"""
   const main = document.querySelector('main');
   if (!main) return false;
   const actionRoot = findActionRoot(main);
   if (!actionRoot) return false;
-  const moreBtn = actionRoot.querySelector('button[aria-expanded]');
+  const moreBtn = findMoreButton(actionRoot);
   if (!moreBtn) return false;
   moreBtn.click();
   return true;
@@ -287,12 +318,36 @@ OPEN_MORE_BUTTON_JS = (
 """
 )
 
+# True once the top card can be read: a Connect / Pending control or the old
+# invite anchor is in the top card, or the More button has hydrated (carries
+# aria-expanded). Live 2026-11-02 a half-loaded page shows Message, Follow and
+# an inert "…" for a second or more; reading or clicking before this holds saw
+# no Connect anywhere. The rail's Connect anchors are excluded (<aside>).
+TOP_CARD_READY_JS = (
+    r"""
+(() => {
+"""
+    + _FIND_ACTION_ROOT_FN_JS
+    + r"""
+  const main = document.querySelector('main');
+  if (!main) return false;
+  const topCard = main.querySelector('section') || main.firstElementChild || main;
+  for (const a of topCard.querySelectorAll(
+    'a[componentkey*="ConnectButtonstate"], a[href*="/preload/custom-invite/"]'
+  )) {
+    if (!a.closest('aside')) return true;
+  }
+  const actionRoot = findActionRoot(main);
+  return !!(actionRoot && actionRoot.querySelector('button[aria-expanded]'));
+})
+"""
+)
+
 # True once the profile's More button can open its menu. Live 2026-11-02
 # (cedric-lewis-830211b1, 2 of 6 loads): the More button first paints with
 # aria-label but no aria-expanded and only gains aria-expanded seconds later,
-# even after the top card's Connect wait has timed out; OPEN_MORE_BUTTON_JS
-# looks for button[aria-expanded], so clicking before then finds nothing and
-# a Connect hidden in the menu was reported as unavailable.
+# even after the top card's Connect wait has timed out; clicking before then
+# does nothing, and a Connect hidden in the menu was reported as unavailable.
 MORE_BUTTON_READY_JS = (
     r"""
 (() => {
@@ -307,14 +362,18 @@ MORE_BUTTON_READY_JS = (
 """
 )
 
-# True once any [role="menu"] is actually rendered. Not
-# wait_for_selector("[role='menu']"): live 2026-11-02 (cedric-lewis-830211b1,
-# 3 of 6 loads) a profile video's hidden caption menus come first in the
-# document, so that wait timed out while the More menu was open with Connect.
-VISIBLE_MENU_JS = r"""
+# True once a visible menu lists a member link (Report, Block, About, Connect
+# all link to the profile). Live 2026-11-02 a profile video's hidden caption
+# menus ([role="menu"], no member links) come first in the document, so menu
+# presence alone proves nothing.
+MORE_MENU_OPEN_JS = r"""
 (() => [...document.querySelectorAll('[role="menu"]')].some((m) => {
   const r = m.getBoundingClientRect();
-  return r.width > 0 && r.height > 0 && getComputedStyle(m).visibility !== 'hidden';
+  return (
+    r.width > 0 && r.height > 0 &&
+    getComputedStyle(m).visibility !== 'hidden' &&
+    !!m.querySelector('a[href*="/in/"]')
+  );
 }))
 """
 
@@ -338,13 +397,6 @@ CLICK_INCOMING_ACCEPT_JS = (
   return true;
 })
 """
-)
-
-
-# The top-card controls LinkedIn hydrates after the first paint in the
-# 2026-10 layout (Connect / Pending), plus the older invite anchor.
-_TOP_CARD_CONNECT_SELECTOR = (
-    'a[componentkey*="ConnectButtonstate"], a[href*="/preload/custom-invite/"]'
 )
 
 
@@ -436,6 +488,27 @@ class ConnectionActions:
             logger.debug("Invite note fill failed", exc_info=True)
             return False
 
+    async def _invite_asks_for_email(self) -> bool:
+        """Whether the open invite dialog asks for the member's email."""
+        if not await self._dialog_is_open(timeout=5000):
+            return False
+        try:
+            return await self._session.page.locator(_DIALOG_EMAIL_SELECTOR).count() > 0
+        except Exception:
+            logger.debug("Email-gate check failed", exc_info=True)
+            return False
+
+    async def _fill_invite_email(self, email: str, *, timeout: int = 5000) -> bool:
+        """Type the member's email into the invite dialog's email field."""
+        try:
+            await self._session.page.locator(_DIALOG_EMAIL_SELECTOR).first.fill(
+                email, timeout=timeout
+            )
+            return True
+        except Exception:
+            logger.debug("Invite email fill failed", exc_info=True)
+            return False
+
     async def _dismiss_dialog(self) -> None:
         """Dismiss any open dialog via Escape key (structural)."""
         await self._session.page.keyboard.press("Escape")
@@ -515,19 +588,26 @@ class ConnectionActions:
         except Exception:
             logger.debug("Waiting for the More button failed", exc_info=True)
             return False
-        try:
-            clicked = await self._session.page.evaluate(OPEN_MORE_BUTTON_JS)
-        except Exception:
-            logger.debug("More button click via JS failed", exc_info=True)
-            return False
-        if not clicked:
-            return False
-        try:
-            await self._session.page.wait_for_function(VISIBLE_MENU_JS, timeout=3000)
-            return True
-        except PlaywrightTimeoutError:
-            logger.info("More menu did not appear after click")
-            return False
+        # A click can still land a moment before the handler is wired up;
+        # one retry covers that without hammering the page.
+        for attempt in range(2):
+            if attempt:
+                await asyncio.sleep(2.0)
+            try:
+                clicked = await self._session.page.evaluate(OPEN_MORE_BUTTON_JS)
+            except Exception:
+                logger.debug("More button click via JS failed", exc_info=True)
+                return False
+            if not clicked:
+                return False
+            try:
+                await self._session.page.wait_for_function(
+                    MORE_MENU_OPEN_JS, timeout=4000
+                )
+                return True
+            except Exception:
+                logger.info("More menu did not appear after click %d", attempt + 1)
+        return False
 
     async def _click_incoming_accept(self) -> bool:
         """Click Accept on an incoming-request profile, locale-independently.
@@ -546,20 +626,50 @@ class ConnectionActions:
             logger.debug("Incoming accept click via JS failed", exc_info=True)
             return False
 
-    async def _wait_for_top_card_actions(self, *, timeout: int = 5000) -> None:
-        """Give LinkedIn a moment to hydrate the Connect / Pending control.
+    async def _wait_for_top_card_actions(self, *, timeout: int = 10000) -> None:
+        """Give LinkedIn a moment to hydrate the top card's action row.
 
-        The 2026-10 top card paints Message and More first and adds the
-        Connect link a moment later; reading signals before that would see
-        no Connect at all. A profile with neither control (1st degree,
-        follow-only) simply times out, which is not an error.
+        The 2026-10 top card paints Message and an inert More first and adds
+        the Connect link, or ``aria-expanded`` on More, a moment later;
+        reading signals before that would see no Connect at all. Waits for
+        ``TOP_CARD_READY_JS``. A row that never hydrates simply times out,
+        which is not an error: the read goes ahead with what rendered.
         """
         try:
-            await self._session.page.wait_for_selector(
-                _TOP_CARD_CONNECT_SELECTOR, state="attached", timeout=timeout
+            await self._session.page.wait_for_function(
+                TOP_CARD_READY_JS, timeout=timeout
             )
         except Exception:
-            logger.debug("No Connect/Pending control appeared before reading signals")
+            logger.debug("Top-card actions did not hydrate before reading signals")
+
+    async def _read_signals_through_more_menu(
+        self, username: str
+    ) -> tuple[ActionSignals, connection.ConnectionState, bool]:
+        """Read the top card, opening More when no Connect is in sight.
+
+        Message-first and Follow-first rows (``already_connected`` /
+        ``follow_only``) can keep Connect under "…" (live 2026-11-02: Cedric
+        Lewis, Blake Ballenger, Mark Schenkman, all Message + Follow + "…").
+        A 1st-degree menu has no Connect anchor, so opening it there is a
+        harmless read. The menu is closed before returning. Returns the
+        signals, their state (classified once) and whether the menu was
+        needed but would not open, in which case the state is unproven.
+        """
+        signals = await self._read_action_signals(username)
+        state = connection.detect_connection_state(signals)
+        if state not in ("follow_only", "already_connected"):
+            return signals, state, False
+        if not await self._open_more_menu():
+            return signals, state, True
+        signals = await self._read_action_signals(username)
+        # Close the menu before any subsequent navigation so it doesn't
+        # intercept the upcoming page transition.
+        try:
+            await self._session.page.keyboard.press("Escape")
+        except Exception:
+            logger.debug("Escape after More-menu reread failed", exc_info=True)
+        logger.info("Post-More signals for %s: signals=%s", username, signals)
+        return signals, connection.detect_connection_state(signals), False
 
     async def _read_action_signals(self, username: str) -> ActionSignals:
         """Read locale-independent structural signals for a profile's
@@ -823,8 +933,13 @@ class ConnectionActions:
         username: str,
         *,
         note: str | None = None,
+        email: str | None = None,
     ) -> dict[str, Any]:
         """Send a LinkedIn connection request or accept an incoming one.
+
+        ``email`` is entered only when LinkedIn's invite dialog asks for the
+        member's address; without it such a dialog returns ``email_required``
+        and nothing is sent.
 
         Detection is locale-independent: classification uses URL patterns
         (vanityName invite anchor, edit-intro anchor) and ARIA-attribute
@@ -850,11 +965,26 @@ class ConnectionActions:
             )
 
         await self._wait_for_top_card_actions()
-        signals = await self._read_action_signals(username)
-        state = connection.detect_connection_state(signals)
+        # Message-first and Follow-first rows may keep Connect under "…";
+        # the read opens it for them, so the state below already counts the
+        # menu (a Pending there outranks everything, as in the top card).
+        signals, state, menu_failed = await self._read_signals_through_more_menu(
+            username
+        )
         logger.info(
             "Connection signals for %s: state=%s signals=%s", username, state, signals
         )
+        if menu_failed:
+            # Retryable, unlike connect_unavailable: Connect may sit in a
+            # menu that simply was not ready yet. Not already_connected
+            # either: a Message-only row is not proof of a connection.
+            return _connection_result(
+                url,
+                "more_menu_unavailable",
+                "LinkedIn's More menu did not open, so a Connect hidden in it "
+                "could not be checked.",
+                profile=page_text,
+            )
 
         if state == "self_profile":
             return _connection_result(
@@ -923,34 +1053,6 @@ class ConnectionActions:
                 profile=verified_text,
             )
 
-        # Follow-only profiles may have Connect hidden under the More menu
-        # (high-follower / creator-mode profiles). Try opening it and
-        # re-reading signals; if the vanityName invite anchor surfaces in
-        # the menu, we can proceed with the deeplink. (The
-        # has_invite_anchor=False guard is implicit: detect_connection_state
-        # only returns "follow_only" after the has_invite_anchor branch
-        # has already failed, so reaching this branch already implies it.)
-        if state == "follow_only":
-            opened = await self._open_more_menu()
-            if not opened:
-                # Retryable, unlike connect_unavailable: Connect may sit in a
-                # menu that simply was not ready yet.
-                return _connection_result(
-                    url,
-                    "more_menu_unavailable",
-                    "LinkedIn's More menu did not open, so a Connect hidden in it could not be checked.",
-                    profile=page_text,
-                )
-            if opened:
-                signals = await self._read_action_signals(username)
-                # Close the menu before any subsequent navigation so it
-                # doesn't intercept the upcoming page transition.
-                try:
-                    await self._session.page.keyboard.press("Escape")
-                except Exception:
-                    logger.debug("Escape after More-menu reread failed", exc_info=True)
-                logger.info("Post-More signals for %s: signals=%s", username, signals)
-
         invite_url = (
             "https://www.linkedin.com/preload/custom-invite/"
             f"?vanityName={quote_plus(username)}"
@@ -987,6 +1089,30 @@ class ConnectionActions:
 
         await self._navigator._navigate_to_page(invite_url)
 
+        # Members who only take invitations from people who know their email
+        # get an email field in the dialog, and Send stays disabled until it
+        # is filled. Without an address there is nothing to send.
+        email_gate = await self._invite_asks_for_email()
+        if email_gate:
+            if not email:
+                await self._dismiss_dialog()
+                return _connection_result(
+                    url,
+                    "email_required",
+                    "LinkedIn asks for this member's email address before it will "
+                    "send an invitation.",
+                    profile=page_text,
+                )
+            if not await self._fill_invite_email(email):
+                await self._dismiss_dialog()
+                return _connection_result(
+                    url,
+                    "connect_unavailable",
+                    "Could not enter the member's email in the invite dialog.",
+                    profile=page_text,
+                )
+            logger.info("Invite for %s asked for an email; entered it", username)
+
         submitted, note_sent, note_limit_message = await self._submit_invite_dialog(
             note
         )
@@ -1005,9 +1131,24 @@ class ConnectionActions:
                 "LinkedIn did not open a usable invite dialog for this profile.",
                 profile=page_text,
             )
+        if email_gate and await self._dialog_is_open(timeout=1000):
+            # Send was clicked but the dialog stayed: LinkedIn did not accept
+            # the address (it does not match the member's). Nothing went out.
+            await self._dismiss_dialog()
+            return _connection_result(
+                url,
+                "email_rejected",
+                "LinkedIn did not accept the email address for this member.",
+                profile=page_text,
+            )
 
         verified = await self._read_main_profile(username)
-        verified_signals = await self._read_action_signals(username)
+        await self._wait_for_top_card_actions()
+        (
+            verified_signals,
+            verified_state,
+            _,
+        ) = await self._read_signals_through_more_menu(username)
         if _exposes_connect(verified_signals):
             # The same settle retry as the accept path: an immediate re-read
             # can still render Connect for an invitation LinkedIn already
@@ -1016,14 +1157,14 @@ class ConnectionActions:
             # landed.
             await asyncio.sleep(3.0)
             retry = await self._read_main_profile(username)
-            retry_signals = await self._read_action_signals(username)
-            if connection.detect_connection_state(retry_signals) in (
-                "pending",
-                "already_connected",
-            ):
+            await self._wait_for_top_card_actions()
+            retry_signals, retry_state, _ = await self._read_signals_through_more_menu(
+                username
+            )
+            if retry_state in ("pending", "already_connected"):
                 verified, verified_signals = retry, retry_signals
+                verified_state = retry_state
         verified_text = verified.get("sections", {}).get("main_profile", "")
-        verified_state = connection.detect_connection_state(verified_signals)
 
         if _exposes_connect(verified_signals):
             return _connection_result(
